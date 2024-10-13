@@ -439,7 +439,7 @@ function ENT:Initialize()
 	//this is a lot better in most cases because it fixes the editor window being hard to open for some models and most effects. doesn't effect toolgun or physgun.
 	//this has a bad interaction with effects where the ring turns blue if we look at any hitbox, when it's supposed to only turn blue when the physgun can grab it,
 	//so that feature has been disabled because the properties upside is a lot more important.
-	if self:GetHitBoxCount(0) > 0 then //don't let this run if the model has 0 hitboxes, or it'll break everything on clients
+	if self:GetHitBoxCount(0) > 0 and self:GetBoneName(0) != "static_prop" then //don't let this run if the model has 0 hitboxes, or it'll break everything on clients; also don't run it on static props, because it either doesn't do anything or actually breaks physgun hit detection like on HL2 bridges (note that SetSurroundingBounds doesn't work on them either)
 		self:SetSurroundingBoundsType(BOUNDS_HITBOXES)
 	end
 
@@ -1276,6 +1276,8 @@ if SERVER then
 
 			self:PhysicsDestroy()
 			self:PhysicsInitMultiConvex(physmesh)
+			//self:PhysicsInit(SOLID_VPHYSICS) //new "make PhysicsInit scale with ModelScale", functionality, doesn't seem to do anything. are we using this wrong?
+			//self:Activate() //supposed to force the physobj to scale
 
 			self:SetCollisionBounds(self:GetModelBounds())
 			self:SetCollisionGroup(COLLISION_GROUP_NONE)
@@ -2931,6 +2933,7 @@ if CLIENT then
 				render.DrawWireframeBox(self:GetPos(), self:GetAngles(), mins, maxs, color_white, true)
 			end
 		end
+		
 	end
 
 	//function ENT:DrawTranslucent()
