@@ -13,7 +13,13 @@ duplicator.RegisterEntityClass("animprop_generic", function(ply, data)
 	//Create a dummy entity with the data table and convert it into an animprop
 	data.Class = "base_gmodentity"
 	data.PhysicsObjects = nil //don't copy this, it'll break stuff
+	local EntityMods = data.EntityMods //the duplicator will apply entitymods to the new animprop after this function finishes; don't pre-apply them to the dummy, or they'll get applied twice
+	local BoneMods = data.BoneMods //this too
+	data.EntityMods = nil
+	data.BoneMods = nil
 	local dummy = duplicator.GenericDuplicatorFunction(ply, data)
+	data.EntityMods = EntityMods
+	data.BoneMods = BoneMods
 	if !IsValid(dummy) then return end
 	local animprop = ConvertEntityToAnimprop(dummy, ply, true, true)
 	if !IsValid(animprop) then dummy:Remove() return end
@@ -83,7 +89,13 @@ duplicator.RegisterEntityClass("animprop_generic_physmodel", function(ply, data)
 
 	//Create a dummy entity with the data table
 	data.Class = "base_gmodentity"
+	local EntityMods = data.EntityMods //the duplicator will apply entitymods to the new animprop after this function finishes; don't pre-apply them to the dummy, or they'll get applied twice
+	local BoneMods = data.BoneMods //this too
+	data.EntityMods = nil
+	data.BoneMods = nil
 	local dummy = duplicator.GenericDuplicatorFunction(ply, data)
+	data.EntityMods = EntityMods
+	data.BoneMods = BoneMods
 	if !IsValid(dummy) then return end
 
 	//Give it a physics object so all constraints attached to it are created properly
@@ -211,7 +223,13 @@ duplicator.RegisterEntityClass("animprop_spawnacarrier", function(ply, data)
 	//Create a dummy entity with the data table and convert it into an animprop
 	data.Class = "base_gmodentity"
 	data.PhysicsObjects = nil //don't copy this, it'll break stuff
+	local EntityMods = data.EntityMods //the duplicator will apply entitymods to the new animprop after this function finishes; don't pre-apply them to the dummy, or they'll get applied twice
+	local BoneMods = data.BoneMods //this too
+	data.EntityMods = nil
+	data.BoneMods = nil
 	local dummy = duplicator.GenericDuplicatorFunction(ply, data)
+	data.EntityMods = EntityMods
+	data.BoneMods = BoneMods
 	if !IsValid(dummy) then return end
 	local animprop = ConvertEntityToAnimprop(dummy, ply, true, true)
 	if !IsValid(animprop) then dummy:Remove() return end
@@ -233,7 +251,7 @@ duplicator.RegisterEntityClass("animprop_spawnacarrier", function(ply, data)
 
 	if CreateAdvBonemergeEntity then
 		//Attach the parts with adv bonemerge tool
-		animprop2 = CreateAdvBonemergeEntity(animprop2, animprop, false, false, 1)
+		animprop2 = CreateAdvBonemergeEntity(animprop2, animprop, ply, false, false, true)
 		constraint.AdvBoneMerge(animprop, animprop2, ply)
 		animprop2.AdvBone_BoneInfo_IsDefault = false
 	else
@@ -262,7 +280,13 @@ local function SpawnTeleporter(ply, data, team, level, entrance)
 	//Create a dummy entity with the data table and convert it into an animprop
 	data.Class = "base_gmodentity"
 	data.PhysicsObjects = nil //don't copy this, it'll break stuff
+	local EntityMods = data.EntityMods //the duplicator will apply entitymods to the new animprop after this function finishes; don't pre-apply them to the dummy, or they'll get applied twice
+	local BoneMods = data.BoneMods //this too
+	data.EntityMods = nil
+	data.BoneMods = nil
 	local dummy = duplicator.GenericDuplicatorFunction(ply, data)
+	data.EntityMods = EntityMods
+	data.BoneMods = BoneMods
 	if !IsValid(dummy) then return end
 	local animprop = ConvertEntityToAnimprop(dummy, ply, true, true)
 	if !IsValid(animprop) then dummy:Remove() return end
@@ -371,7 +395,13 @@ local function SpawnMiniSentry(ply, data, team)
 	//Create a dummy entity with the data table and convert it into an animprop
 	data.Class = "base_gmodentity"
 	data.PhysicsObjects = nil //don't copy this, it'll break stuff
+	local EntityMods = data.EntityMods //the duplicator will apply entitymods to the new animprop after this function finishes; don't pre-apply them to the dummy, or they'll get applied twice
+	local BoneMods = data.BoneMods //this too
+	data.EntityMods = nil
+	data.BoneMods = nil
 	local dummy = duplicator.GenericDuplicatorFunction(ply, data)
+	data.EntityMods = EntityMods
+	data.BoneMods = BoneMods
 	if !IsValid(dummy) then return end
 	local animprop = ConvertEntityToAnimprop(dummy, ply, true, true)
 	if !IsValid(animprop) then dummy:Remove() return end
@@ -429,7 +459,13 @@ local function SpawnTank(ply, data, bodyseq, treadseq, bombseq)
 	//Create a dummy entity with the data table and convert it into an animprop
 	data.Class = "base_gmodentity"
 	data.PhysicsObjects = nil //don't copy this, it'll break stuff
+	local EntityMods = data.EntityMods //the duplicator will apply entitymods to the new animprop after this function finishes; don't pre-apply them to the dummy, or they'll get applied twice
+	local BoneMods = data.BoneMods //this too
+	data.EntityMods = nil
+	data.BoneMods = nil
 	local dummy = duplicator.GenericDuplicatorFunction(ply, data)
+	data.EntityMods = EntityMods
+	data.BoneMods = BoneMods
 	if !IsValid(dummy) then return end
 	local animprop = ConvertEntityToAnimprop(dummy, ply, true, true)
 	if !IsValid(animprop) then dummy:Remove() return end
@@ -461,7 +497,7 @@ local function SpawnTank(ply, data, bodyseq, treadseq, bombseq)
 	if CreateAdvBonemergeEntity then
 		//Attach the parts with adv bonemerge tool
 		local function DoAdvBonemerge(ent)
-			ent = CreateAdvBonemergeEntity(ent, animprop, false, false, 1)
+			ent = CreateAdvBonemergeEntity(ent, animprop, ply, false, false, true)
 			constraint.AdvBoneMerge(animprop, ent, ply)
 			ent.AdvBone_BoneInfo_IsDefault = false
 		end
