@@ -2464,15 +2464,7 @@ else
 				if (bit.band(self.DoRagdollizeOnDamage.type, DMG_SHOCK) == DMG_SHOCK) then
 					dissolvetype = 1 //ENTITY_DISSOLVE_ELECTRICAL
 				end
-				local dissolver = ents.Create("env_entity_dissolver")
-				if IsValid(dissolver) then
-					dissolver:Spawn()
-					local name = "dissolver_" .. math.random()
-					rag:SetName(name)
-					dissolver:SetKeyValue("dissolvetype", dissolvetype)
-					dissolver:Fire("Dissolve", name, 0)
-					rag:DeleteOnRemove(dissolver)
-				end
+				rag:Dissolve(dissolvetype, 250) //250 is what the dissolve effect defaults to, i think (https://github.com/ValveSoftware/source-sdk-2013/blob/master/sp/src/game/server/EntityDissolve.cpp#L85-L89)
 			end
 			if !(bit.band(self.DoRagdollizeOnDamage.type, DMG_REMOVENORAGDOLL) == DMG_REMOVENORAGDOLL)  then
 				//Based off CBaseCombatCharacter::BecomeRagdoll (https://github.com/ValveSoftware/source-sdk-2013/blob/master/mp/src/game/server/basecombatcharacter.cpp#L1491)

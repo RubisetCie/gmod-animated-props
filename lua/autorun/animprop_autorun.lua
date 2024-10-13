@@ -87,13 +87,13 @@ else
 
 	end
 
-	net.Receive("AnimProp_OpenEditMenu_SendToCl", function(_, ply)
+	net.Receive("AnimProp_OpenEditMenu_SendToCl", function()
 
 		local ent = net.ReadEntity()
 
 		if !IsValid(ent) then return end
 		if ent:GetClass() != "prop_animated" then return end
-		if !gamemode.Call("CanProperty", ply, "editanimprop", ent) then return end
+		if !gamemode.Call("CanProperty", LocalPlayer(), "editanimprop", ent) then return end
 
 		OpenAnimpropEditor(ent)
 
