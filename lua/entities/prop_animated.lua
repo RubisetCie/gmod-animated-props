@@ -505,9 +505,7 @@ function ENT:Think()
 			self.CurModelScale = self:GetModelScale()
 
 			//Advanced Bonemerge: We're updating the prop's bone positions, make sure BuildBonePositions starts running again
-			net.Start("AdvBone_ResetBoneChangeTime_SendToCl")
-				net.WriteEntity(self)
-			net.Broadcast()
+			AdvBone_ResetBoneChangeTime(self)
 		end
 
 
@@ -699,7 +697,7 @@ function ENT:Think()
 
 		//(Advanced Bonemerge) If we don't have a clientside boneinfo table, or need to update it, then request it from the server
 		if !self.AdvBone_BoneInfo_Received and duplicator.FindEntityClass("ent_advbonemerge") then
-			net.Start("AdvBone_EntBoneInfoTable_GetFromSv")
+			net.Start("AdvBone_EntBoneInfoTable_GetFromSv", true)
 				net.WriteEntity(self)
 			net.SendToServer()
 		end
@@ -799,7 +797,7 @@ function ENT:Think()
 		//If we have a puppeteer, but don't have a clientside remapinfo table, or need to update it, then request it from the server
 		if IsValid(self:GetPuppeteer()) then 
 			if !self.RemapInfo_Received then
-				net.Start("AnimProp_RemapInfoTable_GetFromSv")
+				net.Start("AnimProp_RemapInfoTable_GetFromSv", true)
 					net.WriteEntity(self)
 				net.SendToServer()
 			end
@@ -938,16 +936,12 @@ if SERVER then
 	function ENT:StartAnimation(i,startframe)
 
 		//Advanced Bonemerge: We're updating the animation, make sure BuildBonePositions starts running again
-		net.Start("AdvBone_ResetBoneChangeTime_SendToCl")
-			net.WriteEntity(self)
-		net.Broadcast()
+		AdvBone_ResetBoneChangeTime(self)
 		//Puppeteers can run this too, so make sure they wake up their parent as well
 		if self.IsPuppeteer then 
 			local parent = self:GetParent()
 			if IsValid(parent) then
-				net.Start("AdvBone_ResetBoneChangeTime_SendToCl")
-					net.WriteEntity(parent)
-				net.Broadcast()
+				AdvBone_ResetBoneChangeTime(parent)
 			end
 		end
 
@@ -1609,14 +1603,10 @@ if SERVER then
 			self.PoseParams[i] = value
 
 			//Advanced Bonemerge: We're updating the animation, make sure BuildBonePositions starts running again
-			net.Start("AdvBone_ResetBoneChangeTime_SendToCl")
-				net.WriteEntity(self)
-			net.Broadcast()
+			AdvBone_ResetBoneChangeTime(self)
 			//Puppeteers can run this too, so make sure they wake up their parent as well
 			if self.IsPuppeteer and IsValid(self:GetParent()) then
-				net.Start("AdvBone_ResetBoneChangeTime_SendToCl")
-					net.WriteEntity(self:GetParent())
-				net.Broadcast()
+				AdvBone_ResetBoneChangeTime(self:GetParent())
 			end
 
 		elseif input == 12 then //Set control movement pose parameters
@@ -2422,9 +2412,7 @@ else
 				self:SetPos(rag:GetPos() + height)							//the animprop's height
 
 				//Also give BuildBonePositions a nudge to prevent cases where the origin manip would keep showing the animprop in its old location
-				net.Start("AdvBone_ResetBoneChangeTime_SendToCl")
-					net.WriteEntity(self)
-				net.Broadcast()
+				AdvBone_ResetBoneChangeTime(self)
 			end)
 		end
 
@@ -3315,7 +3303,7 @@ if SERVER then
 		local ent = net.ReadEntity()
 		if !IsValid(ent) or ent:GetClass() != "prop_animated" or !ent.RemapInfo or !ent.GetPuppeteer or !IsValid(ent:GetPuppeteer()) then return end
 
-		net.Start("AnimProp_RemapInfoTable_SendToCl")
+		net.Start("AnimProp_RemapInfoTable_SendToCl", true)
 			net.WriteEntity(ent)
 
 			net.WriteInt(table.Count(ent.RemapInfo), 9)
@@ -4370,9 +4358,23 @@ end
 
 
 
+//note 10/15/14: this is now duplicated code in both advbone and animpropoverhaul, lame
 if SERVER then
 
 	util.AddNetworkString("AdvBone_ResetBoneChangeTime_SendToCl")
+
+	AdvBone_ResetBoneChangeTime = function(ent)
+		//Limit how often the server sends this to clients; i don't know of any obvious cases where this would happen a lot like AdvBone_ResetBoneChangeTimeOnChildren does from manips
+		//or stop motion helper, but let's be safe here
+		local time = CurTime()
+		ent.AdvBone_ResetBoneChangeTime_LastSent = ent.AdvBone_ResetBoneChangeTime_LastSent or 0
+		if time > ent.AdvBone_ResetBoneChangeTime_LastSent then
+			ent.AdvBone_ResetBoneChangeTime_LastSent = time
+			net.Start("AdvBone_ResetBoneChangeTime_SendToCl", true)
+				net.WriteEntity(ent)
+			net.Broadcast()
+		end
+	end
 
 else
 
