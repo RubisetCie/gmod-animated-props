@@ -76,6 +76,172 @@ if SERVER then
 			return damage
 		end
 	end
+
+	function ENT:PhysicsCollide(data)
+		//Based loosely off CBaseCombatCharacter::VPhysicsShadowCollision (https://github.com/ValveSoftware/source-sdk-2013/blob/master/mp/src/game/server/basecombatcharacter.cpp#L3080)
+		//That function is the one used by standard NPCs, not physics objects, so it has a bunch of criteria that we don't want, like not taking collision damage non-vphysics objects, 
+		//frozen objects, or the world.
+		if !IsValid(self) then return end
+		if !self:GetRagdollizeOnDamage() then return end
+
+		local damageType = DMG_CRUSH
+		//Based off CalculatePhysicsImpactDamage (https://github.com/ValveSoftware/source-sdk-2013/blob/master/mp/src/game/server/physics_impact_damage.cpp#L249)
+		local function CalculatePhysicsImpactDamage()
+			local energyScale = 1
+			local allowStaticDamage = true
+
+			//Take dissolve damage from combine balls (we do this a little differently from the valve code - we always have EFL_NO_DISSOLVE set, 
+			//so that the prop itself doesn't get dissolved, but then we take dissolve damage here anyway, so that the ragdoll does)
+			if data.HitObject:HasGameFlag(FVPHYSICS_DMG_DISSOLVE) then
+				damageType = DMG_DISSOLVE
+				return 1000
+			end
+
+			//Don't take damage if they're a non-moving object due to a constraint, or if they're just set not to deal impact damage
+			if data.HitObject:HasGameFlag(FVPHYSICS_CONSTRAINT_STATIC) or data.HitObject:HasGameFlag(FVPHYSICS_NO_IMPACT_DMG) then
+				return 0
+			end
+			//Don't take damage from held objects (use key, gravity gun, physgun)
+			if data.HitObject:HasGameFlag(FVPHYSICS_PLAYER_HELD) then
+				return 0
+			end
+			//If they're a multi-object entity like a ragdoll or vehicle, then don't take damage if ANY of their physobjs are set not to deal impact damage
+			if data.HitObject:HasGameFlag(FVPHYSICS_MULTIOBJECT_ENTITY) then
+				for i = 0, data.HitEntity:GetPhysicsObjectCount() - 1 do
+					local phys = data.HitEntity:GetPhysicsObjectNum(i)
+					if phys:HasGameFlag(FVPHYSICS_CONSTRAINT_STATIC) or phys:HasGameFlag(FVPHYSICS_NO_IMPACT_DMG) then
+						return 0
+					end
+				end
+			end
+			//Don't take damage from players or the world (static damage) if we're being held
+			if data.PhysObject:HasGameFlag(FVPHYSICS_PLAYER_HELD) then
+				if data.HitEntity:IsPlayer() then
+					return 0
+				end
+				allowStaticDamage = false
+			end
+
+			local otherSpeedSqr = data.TheirOldVelocity:LengthSqr()
+			local otherAngSqr = 0
+			//Only factor in angular velocity when we're colliding with 'sharp' objects (things marked specifically as dealing this sort of damage, like whirling fanblades)
+			if data.HitObject:HasGameFlag(FVPHYSICS_DMG_SLICE) then
+				otherAngSqr = data.TheirOldAngularVelocity:LengthSqr()
+			end
+			local otherMass = data.HitObject:GetMass()
+			//If they're a multi-object entity then get their total mass for the purpose of damage
+			if data.HitObject:HasGameFlag(FVPHYSICS_MULTIOBJECT_ENTITY) then
+				local mass = 0
+				for i = 0, data.HitEntity:GetPhysicsObjectCount() - 1 do
+					local phys = data.HitEntity:GetPhysicsObjectNum(i)
+					mass = (mass + phys:GetMass())
+				end
+				otherMass = mass
+			end
+			//If they're flagged as a 'heavy' object then override the mass and exaggerate the energy scale - what actually uses this?
+			if data.HitObject:HasGameFlag(FVPHYSICS_HEAVY_OBJECT) then
+				otherMass = dmgTable.largeMassMin
+				//if energyScale < 2 then
+					energyScale = 2
+				//end
+			end
+			if !allowStaticDamage then
+				if otherMass < dmgTable.minMass then return 0 end
+				if otherMass < dmgTable.smallMassMax and otherSpeedSqr < dmgTable.smallMassMinSpeedSqr then return 0 end
+				if otherSpeedSqr < dmgTable.minSpeedSqr and otherAngSqr < dmgTable.minRotSpeedSqr then return 0 end
+			end
+			//"Add extra oomph for floating objects"
+			if self:WaterLevel() > 0 and !(data.HitEntity:IsWorld()) then
+				if energyScale < 3 then
+					energyScale = 3
+				end
+			end
+
+
+			local damage = 0
+
+			//Take angular damage (if enabled) from them if they're spinning fast enough
+			if otherAngSqr > dmgTable.minRotSpeedSqr then
+				local otherInertia = data.HitObject:GetInertia()
+
+				local vel = data.TheirOldAngularVelocity
+				local angularMomentum = math.abs(otherInertia.x*vel.x) + math.abs(otherInertia.y*vel.y) + math.abs(otherInertia.z*vel.z) //vec_t DotProductAbs (https://github.com/ValveSoftware/source-sdk-2013/blob/master/mp/src/public/mathlib/vector.h#L1223)
+
+				damage = ReadDamageTable(dmgTable.angularTable, angularMomentum * energyScale)
+				if damage > 0 then
+					damageType = bit.bor(damageType, DMG_SLASH)
+				end
+			end
+
+			local deltaV = data.OurOldVelocity:Length() - data.OurNewVelocity:Length()
+			local mass = data.PhysObject:GetMass()
+			//If I lost speed, and I lost less than min velocity, then filter out this energy
+			if deltaV > 0 and deltaV < dmgTable.myMinVelocity then
+				deltaV = 0
+			end
+			local eliminatedEnergy = deltaV * deltaV * mass
+			deltaV = data.TheirOldVelocity:Length() - data.TheirNewVelocity:Length()
+			otherEliminatedEnergy = deltaV * deltaV * otherMass
+
+			//Esaggerate the effects of really large objects
+			if otherMass >= dmgTable.largeMassMin then
+				otherEliminatedEnergy = otherEliminatedEnergy * dmgTable.largeMassScale
+				local dz = data.TheirOldVelocity.z - data.TheirNewVelocity.z
+				if deltaV > 0 and dz < 0 and data.TheirOldVelocity.z < 0 then
+					local factor = math.abs(dz / deltaV)
+					otherEliminatedEnergy = otherEliminatedEnergy * (1 + factor * (dmgTable.largeMassFallingScale - 1))
+				end
+			end
+			eliminatedEnergy = eliminatedEnergy + otherEliminatedEnergy
+
+			//"now in units of this character's speed squared"
+			local invMass = data.PhysObject:GetInvMass()
+			if !data.PhysObject:IsMoveable() then
+				invMass = 1 / data.PhysObject:GetMass()
+			end
+			//note: valve code here retrieves the "real" mass of our object if it's being held by a player, but i dont think we have a way to retrieve that in lua
+			eliminatedEnergy = eliminatedEnergy * (invMass * energyScale)
+			damage = damage + ReadDamageTable(dmgTable.linearTable, eliminatedEnergy)
+			//Don't take more than a certain amount of damage from really small objects
+			if !(data.HitEntity:IsWorld() or data.HitEntity:IsFlagSet(FL_STATICPROP)) then //valve code here checks if data.HitObject:IsStatic(), which isn't anything in lua. seems to make sure we can still take damage from stuff like the world, which has 1 mass but obviously shouldn't count as small. TODO: is there anything else we should be checking for here?
+				if otherMass < dmgTable.smallMassMax and dmgTable.smallMassCap > 0 then
+					damage = math.Clamp(damage, 0, dmgTable.smallMassCap)
+				end
+			end
+
+			return damage
+		end
+		local damage = CalculatePhysicsImpactDamage()
+
+		if damage <= 0 then return end
+
+		local damageForce = data.OurNewVelocity * data.PhysObject:GetMass() * phys_impactforcescale:GetFloat()
+		if damageForce == Vector(0,0,0) then  //If we're immovable then get the velocity of the object that hit us instead, this sucks bad but it's better than nothing
+			damageForce = data.TheirNewVelocity * data.HitObject:GetMass() * phys_impactforcescale:GetFloat()
+		end
+		//if hit by vehicle driven by player, add some upward velocity to force
+		if data.HitEntity:IsVehicle() and IsValid(data.HitEntity:GetPassenger(0)) then
+			damageType = bit.bor(damageType, DMG_VEHICLE)
+			local len = damageForce:Length()
+			damageForce.z = damageForce.z + (len*phys_upimpactforcescale:GetFloat())
+		end
+
+		local dmgInfo = DamageInfo()
+		dmgInfo:SetAttacker(data.HitEntity)
+		dmgInfo:SetInflictor(data.HitEntity)
+		dmgInfo:SetDamageForce(damageForce)
+		dmgInfo:SetDamagePosition(data.HitPos)
+		dmgInfo:SetDamage(damage)
+		dmgInfo:SetDamageType(damageType)
+		local player = data.HitEntity:GetPhysicsAttacker()
+		if IsValid(player) then
+			dmgInfo:SetAttacker(player)
+		end
+		//valve code here sets m_nForceBone = 0; we should have this too since we'll be taking damage but not calling the trace damage func
+
+		data.PhysObject:EnableMotion(true)
+		self:TakeDamageInfo(dmgInfo)
+	end
 end
 
 
@@ -246,171 +412,7 @@ function ENT:Initialize()
 
 		//Do physics collision damage stuff for ragdollize-on-damage
 		self:AddEFlags(EFL_NO_DISSOLVE)
-		self:AddCallback("PhysicsCollide", function(_, data)
-			//Based loosely off CBaseCombatCharacter::VPhysicsShadowCollision (https://github.com/ValveSoftware/source-sdk-2013/blob/master/mp/src/game/server/basecombatcharacter.cpp#L3080)
-			//That function is the one used by standard NPCs, not physics objects, so it has a bunch of criteria that we don't want, like not taking collision damage non-vphysics objects, 
-			//frozen objects, or the world.
-			if !IsValid(self) then return end
-			if !self:GetRagdollizeOnDamage() then return end
-
-			local damageType = DMG_CRUSH
-			//Based off CalculatePhysicsImpactDamage (https://github.com/ValveSoftware/source-sdk-2013/blob/master/mp/src/game/server/physics_impact_damage.cpp#L249)
-			local function CalculatePhysicsImpactDamage()
-				local energyScale = 1
-				local allowStaticDamage = true
-
-				//Take dissolve damage from combine balls (we do this a little differently from the valve code - we always have EFL_NO_DISSOLVE set, 
-				//so that the prop itself doesn't get dissolved, but then we take dissolve damage here anyway, so that the ragdoll does)
-				if data.HitObject:HasGameFlag(FVPHYSICS_DMG_DISSOLVE) then
-					damageType = DMG_DISSOLVE
-					return 1000
-				end
-
-				//Don't take damage if they're a non-moving object due to a constraint, or if they're just set not to deal impact damage
-				if data.HitObject:HasGameFlag(FVPHYSICS_CONSTRAINT_STATIC) or data.HitObject:HasGameFlag(FVPHYSICS_NO_IMPACT_DMG) then
-					return 0
-				end
-				//Don't take damage from held objects (use key, gravity gun, physgun)
-				if data.HitObject:HasGameFlag(FVPHYSICS_PLAYER_HELD) then
-					return 0
-				end
-				//If they're a multi-object entity like a ragdoll or vehicle, then don't take damage if ANY of their physobjs are set not to deal impact damage
-				if data.HitObject:HasGameFlag(FVPHYSICS_MULTIOBJECT_ENTITY) then
-					for i = 0, data.HitEntity:GetPhysicsObjectCount() - 1 do
-						local phys = data.HitEntity:GetPhysicsObjectNum(i)
-						if phys:HasGameFlag(FVPHYSICS_CONSTRAINT_STATIC) or phys:HasGameFlag(FVPHYSICS_NO_IMPACT_DMG) then
-							return 0
-						end
-					end
-				end
-				//Don't take damage from players or the world (static damage) if we're being held
-				if data.PhysObject:HasGameFlag(FVPHYSICS_PLAYER_HELD) then
-					if data.HitEntity:IsPlayer() then
-						return 0
-					end
-					allowStaticDamage = false
-				end
-
-				local otherSpeedSqr = data.TheirOldVelocity:LengthSqr()
-				local otherAngSqr = 0
-				//Only factor in angular velocity when we're colliding with 'sharp' objects (things marked specifically as dealing this sort of damage, like whirling fanblades)
-				if data.HitObject:HasGameFlag(FVPHYSICS_DMG_SLICE) then
-					otherAngSqr = data.TheirOldAngularVelocity:LengthSqr()
-				end
-				local otherMass = data.HitObject:GetMass()
-				//If they're a multi-object entity then get their total mass for the purpose of damage
-				if data.HitObject:HasGameFlag(FVPHYSICS_MULTIOBJECT_ENTITY) then
-					local mass = 0
-					for i = 0, data.HitEntity:GetPhysicsObjectCount() - 1 do
-						local phys = data.HitEntity:GetPhysicsObjectNum(i)
-						mass = (mass + phys:GetMass())
-					end
-					otherMass = mass
-				end
-				//If they're flagged as a 'heavy' object then override the mass and exaggerate the energy scale - what actually uses this?
-				if data.HitObject:HasGameFlag(FVPHYSICS_HEAVY_OBJECT) then
-					otherMass = dmgTable.largeMassMin
-					//if energyScale < 2 then
-						energyScale = 2
-					//end
-				end
-				if !allowStaticDamage then
-					if otherMass < dmgTable.minMass then return 0 end
-					if otherMass < dmgTable.smallMassMax and otherSpeedSqr < dmgTable.smallMassMinSpeedSqr then return 0 end
-					if otherSpeedSqr < dmgTable.minSpeedSqr and otherAngSqr < dmgTable.minRotSpeedSqr then return 0 end
-				end
-				//"Add extra oomph for floating objects"
-				if self:WaterLevel() > 0 and !(data.HitEntity:IsWorld()) then
-					if energyScale < 3 then
-						energyScale = 3
-					end
-				end
-
-
-				local damage = 0
-
-				//Take angular damage (if enabled) from them if they're spinning fast enough
-				if otherAngSqr > dmgTable.minRotSpeedSqr then
-					local otherInertia = data.HitObject:GetInertia()
-
-					local vel = data.TheirOldAngularVelocity
-					local angularMomentum = math.abs(otherInertia.x*vel.x) + math.abs(otherInertia.y*vel.y) + math.abs(otherInertia.z*vel.z) //vec_t DotProductAbs (https://github.com/ValveSoftware/source-sdk-2013/blob/master/mp/src/public/mathlib/vector.h#L1223)
-
-					damage = ReadDamageTable(dmgTable.angularTable, angularMomentum * energyScale)
-					if damage > 0 then
-						damageType = bit.bor(damageType, DMG_SLASH)
-					end
-				end
-
-				local deltaV = data.OurOldVelocity:Length() - data.OurNewVelocity:Length()
-				local mass = data.PhysObject:GetMass()
-				//If I lost speed, and I lost less than min velocity, then filter out this energy
-				if deltaV > 0 and deltaV < dmgTable.myMinVelocity then
-					deltaV = 0
-				end
-				local eliminatedEnergy = deltaV * deltaV * mass
-				deltaV = data.TheirOldVelocity:Length() - data.TheirNewVelocity:Length()
-				otherEliminatedEnergy = deltaV * deltaV * otherMass
-
-				//Esaggerate the effects of really large objects
-				if otherMass >= dmgTable.largeMassMin then
-					otherEliminatedEnergy = otherEliminatedEnergy * dmgTable.largeMassScale
-					local dz = data.TheirOldVelocity.z - data.TheirNewVelocity.z
-					if deltaV > 0 and dz < 0 and data.TheirOldVelocity.z < 0 then
-						local factor = math.abs(dz / deltaV)
-						otherEliminatedEnergy = otherEliminatedEnergy * (1 + factor * (dmgTable.largeMassFallingScale - 1))
-					end
-				end
-				eliminatedEnergy = eliminatedEnergy + otherEliminatedEnergy
-
-				//"now in units of this character's speed squared"
-				local invMass = data.PhysObject:GetInvMass()
-				if !data.PhysObject:IsMoveable() then
-					invMass = 1 / data.PhysObject:GetMass()
-				end
-				//note: valve code here retrieves the "real" mass of our object if it's being held by a player, but i dont think we have a way to retrieve that in lua
-				eliminatedEnergy = eliminatedEnergy * (invMass * energyScale)
-				damage = damage + ReadDamageTable(dmgTable.linearTable, eliminatedEnergy)
-				//Don't take more than a certain amount of damage from really small objects
-				if !(data.HitEntity:IsWorld() or data.HitEntity:IsFlagSet(FL_STATICPROP)) then //valve code here checks if data.HitObject:IsStatic(), which isn't anything in lua. seems to make sure we can still take damage from stuff like the world, which has 1 mass but obviously shouldn't count as small. TODO: is there anything else we should be checking for here?
-					if otherMass < dmgTable.smallMassMax and dmgTable.smallMassCap > 0 then
-						damage = math.Clamp(damage, 0, dmgTable.smallMassCap)
-					end
-				end
-
-				return damage
-			end
-			local damage = CalculatePhysicsImpactDamage()
-
-			if damage <= 0 then return end
-
-			local damageForce = data.OurNewVelocity * data.PhysObject:GetMass() * phys_impactforcescale:GetFloat()
-			if damageForce == Vector(0,0,0) then  //If we're immovable then get the velocity of the object that hit us instead, this sucks bad but it's better than nothing
-				damageForce = data.TheirNewVelocity * data.HitObject:GetMass() * phys_impactforcescale:GetFloat()
-			end
-			//if hit by vehicle driven by player, add some upward velocity to force
-			if data.HitEntity:IsVehicle() and IsValid(data.HitEntity:GetPassenger(0)) then
-				damageType = bit.bor(damageType, DMG_VEHICLE)
-				local len = damageForce:Length()
-				damageForce.z = damageForce.z + (len*phys_upimpactforcescale:GetFloat())
-			end
-
-			local dmgInfo = DamageInfo()
-			dmgInfo:SetAttacker(data.HitEntity)
-			dmgInfo:SetInflictor(data.HitEntity)
-			dmgInfo:SetDamageForce(damageForce)
-			dmgInfo:SetDamagePosition(data.HitPos)
-			dmgInfo:SetDamage(damage)
-			dmgInfo:SetDamageType(damageType)
-			local player = data.HitEntity:GetPhysicsAttacker()
-			if IsValid(player) then
-				dmgInfo:SetAttacker(player)
-			end
-			//valve code here sets m_nForceBone = 0; we should have this too since we'll be taking damage but not calling the trace damage func
-
-			data.PhysObject:EnableMotion(true)
-			self:TakeDamageInfo(dmgInfo)
-		end)
+		self:AddCallback("PhysicsCollide", self.PhysicsCollide)
 
 	else
 
@@ -648,12 +650,14 @@ function ENT:Think()
 
 		//Fix for demo recording and playback - when demos are recorded, they wipe a bunch of clientside settings like LODs and our BuildBonePositions callback, so redo those by running Initialize.
 		//They also don't seem to record clientside values set on the entity before recording, so tell the server to send us a new BoneInfo and RemapInfo table so we can actually record these ones.
-		if engine.IsRecordingDemo() and #self:GetCallbacks("BuildBonePositions") == 0 and self.GetPuppeteer then
+		//Note 10/16/24: Newly connected players also do this, they run Initialize but then wipe the callback and LOD setting right after.
+		//However, unlike ent_advbonemerge and prop_resizedragdoll_physparent, this entity still gets the chance to run BuildBonePositions 1-3 times before it gets wiped, so we can't rely 
+		//on checking if it's already run the function. Instead, we have to check this all the time, and make GetCallbacks create a new table every frame. >:(
+		if --[[(!self.BuildBonePositions_HasRun or engine.IsRecordingDemo()) and]] #self:GetCallbacks("BuildBonePositions") == 0 and self.GetPuppeteer then
 			self:Initialize()
 			self.AdvBone_BoneInfo_Received = false
-			timer.Simple(1, function() //we have to do this one on a timer - otherwise, if the ent was spawned before recording, upon playback the recorded remapinfo receive func will run 
-			//BEFORE the ent has nwvars set up, so the receive func won't be able to get the puppeteer
-				self.RemapInfo_Received = false
+			timer.Simple(1, function() 		//we have to do this one on a timer - otherwise, if the ent was spawned before recording, upon playback the recorded remapinfo 
+				self.RemapInfo_Received = false	//receive func will run BEFORE the ent has nwvars set up, so the receive func won't be able to get the puppeteer
 			end)
 		end
 
@@ -3455,7 +3459,7 @@ if CLIENT then
 		end
 
 		//Create a clientside advbone manips table so that it gets filled when the server sends us values
-		self.AdvBone_BoneManips = {}
+		self.AdvBone_BoneManips = self.AdvBone_BoneManips or {}
 
 		//Store hitbox bounds by bone; we use these to help with renderbounds
 		self.AdvBone_BoneHitBoxes = {}
@@ -3481,193 +3485,592 @@ if CLIENT then
 		self.LastBoneChangeTime = CurTime()
 		self.DoBuildBonePositions = 0
 
-		self:AddCallback("BuildBonePositions", function(_, bonecount)
-			if !IsValid(self) then return end
-			local curtime = CurTime()
-			if self.DoBuildBonePositions < curtime then return end //don't run this func this frame until our think func lets us, otherwise bad stuff can happen (see think func comment)
+		self:AddCallback("BuildBonePositions", self.BuildBonePositions)
 
-			//Handle in-code tf2 minigun animation, even if we don't want to do all the expensive advbonemerge stuff
-			if self.MinigunAnimBone then
-				local matr = self:GetBoneMatrix(self.MinigunAnimBone)
-				if matr then
-					matr:Rotate( Angle(0, self.MinigunAnimAngle, 0) )
-					self:SetBoneMatrix(self.MinigunAnimBone, matr)
-				end
+	end
+
+	function ENT:BuildBonePositions(bonecount)
+		if !IsValid(self) then return end
+		//self.BuildBonePositions_HasRun = true //Newly connected players will add this callback, but then wipe it; this tells the think func that it actually went through
+		local curtime = CurTime()
+		if self.DoBuildBonePositions < curtime then return end //don't run this func this frame until our think func lets us, otherwise bad stuff can happen (see think func comment)
+
+		//Handle in-code tf2 minigun animation, even if we don't want to do all the expensive advbonemerge stuff
+		if self.MinigunAnimBone then
+			local matr = self:GetBoneMatrix(self.MinigunAnimBone)
+			if matr then
+				matr:Rotate( Angle(0, self.MinigunAnimAngle, 0) )
+				self:SetBoneMatrix(self.MinigunAnimBone, matr)
 			end
+		end
 
-			//Remapping: We need a table of default bone offsets for both the parent and the puppeteer, using this code mostly copy-pasted from advbonemerge
-			//Ragdollize uses this info too, so do this even if we're not remapping or doing all the expensive advbonemerge stuff
-			//if (puppeteer or self.IsPuppeteer) and !self.RemapInfo_DefaultBoneOffsets then
-			if !self.RemapInfo_DefaultBoneOffsets then
-				//Grab the bone matrices from a clientside model instead - if we use ourselves, any bone manips we already have will be applied to the 
-				//matrices, making the altered bones the new default (and then the manips will be applied again on top of them, basically "doubling" the manips)
-				//NOTE: The comment below is from advbonemerge which we copied most of this from, but probably doesn't apply here since we could be running this addon without 
-				//advbonemerge installed, which means we could be using garrymanips instead of advbonemerge's manip function overrides.
-				//(UPDATE: this entity doesn't use garrymanips any more so using a separate ent is no longer necessary. should we change this to just use this entity now?
-				//it's pretty inconsequential whether we keep using this method or not, unless some other factor i'm not aware of messes up our bones or model bounds or something)
-				if !self.csmodel then
-					//NOTE: This used ClientsideModel before, but users reported this causing crashes with very specific models (those with over max flexes?) (lordaardvark dazv5 overwatch pack h ttps://mega.nz/file/1vBjUQ6D#Yj72iK7eKAkIrnbwTVp66CEgu01nQ6wLNMFXoG-fvIw). This is clearly a much deeper issue, since this same function with the same models also crashes in other contexts (like rendering spawnicons, which the model author knew about and included a workaround for), but until it's fixed a workaround like this is necessary.
-					self.csmodel = ents.CreateClientProp()
-					self.csmodel:SetModel(self:GetModel())
-					//self.csmodel = ClientsideModel(self:GetModel(),RENDERGROUP_TRANSLUCENT)
-					self.csmodel:SetPos(self:GetPos())
-					self.csmodel:SetAngles(self:GetAngles())
-					self.csmodel:SetMaterial("null")  //invisible texture, so players don't see the csmodel for a split second while we're generating the table
-					self.csmodel:SetLOD(0)
+		//Remapping: We need a table of default bone offsets for both the parent and the puppeteer, using this code mostly copy-pasted from advbonemerge
+		//Ragdollize uses this info too, so do this even if we're not remapping or doing all the expensive advbonemerge stuff
+		//if (puppeteer or self.IsPuppeteer) and !self.RemapInfo_DefaultBoneOffsets then
+		if !self.RemapInfo_DefaultBoneOffsets then
+			//Grab the bone matrices from a clientside model instead - if we use ourselves, any bone manips we already have will be applied to the 
+			//matrices, making the altered bones the new default (and then the manips will be applied again on top of them, basically "doubling" the manips)
+			//NOTE: The comment below is from advbonemerge which we copied most of this from, but probably doesn't apply here since we could be running this addon without 
+			//advbonemerge installed, which means we could be using garrymanips instead of advbonemerge's manip function overrides.
+			//(UPDATE: this entity doesn't use garrymanips any more so using a separate ent is no longer necessary. should we change this to just use this entity now?
+			//it's pretty inconsequential whether we keep using this method or not, unless some other factor i'm not aware of messes up our bones or model bounds or something)
+			if !self.csmodel then
+				//NOTE: This used ClientsideModel before, but users reported this causing crashes with very specific models (those with over max flexes?) (lordaardvark dazv5 overwatch pack h ttps://mega.nz/file/1vBjUQ6D#Yj72iK7eKAkIrnbwTVp66CEgu01nQ6wLNMFXoG-fvIw). This is clearly a much deeper issue, since this same function with the same models also crashes in other contexts (like rendering spawnicons, which the model author knew about and included a workaround for), but until it's fixed a workaround like this is necessary.
+				self.csmodel = ents.CreateClientProp()
+				self.csmodel:SetModel(self:GetModel())
+				//self.csmodel = ClientsideModel(self:GetModel(),RENDERGROUP_TRANSLUCENT)
+				self.csmodel:SetPos(self:GetPos())
+				self.csmodel:SetAngles(self:GetAngles())
+				self.csmodel:SetMaterial("null")  //invisible texture, so players don't see the csmodel for a split second while we're generating the table
+				self.csmodel:SetLOD(0)
 
-					//Try to make sure models with a non-reference default pose (i.e. HL2 zombies) use a reference pose instead
-					local defaultact = self.csmodel:GetSequenceActivity(0)
-					if defaultact != ACT_INVALID and defaultact != ACT_DIERAGDOLL then
-						local sequence = self.csmodel:SelectWeightedSequence(ACT_DIERAGDOLL)
-						if sequence != -1 then
-							self.csmodel:SetSequence(sequence)
-							self.csmodel:ResetSequence(sequence)
-						end
+				//Try to make sure models with a non-reference default pose (i.e. HL2 zombies) use a reference pose instead
+				local defaultact = self.csmodel:GetSequenceActivity(0)
+				if defaultact != ACT_INVALID and defaultact != ACT_DIERAGDOLL then
+					local sequence = self.csmodel:SelectWeightedSequence(ACT_DIERAGDOLL)
+					if sequence != -1 then
+						self.csmodel:SetSequence(sequence)
+						self.csmodel:ResetSequence(sequence)
 					end
 				end
-				self.csmodel:DrawModel()
-				self.csmodel:SetupBones()
-				self.csmodel:InvalidateBoneCache()
-				if self.csmodel and self.csmodel:GetBoneMatrix(0) == nil and self.csmodel:GetBoneMatrix(bonecount - 1) == nil then return end //the csmodel might need a frame or so to start returning the matrices; on some models like office workers from Black Mesa Character Expansion (https://steamcommunity.com/sharedfiles/filedetails/?id=2082334251), this always returns nil for the root bone but still works for the others, so make sure we check more than one bone
-
-				local defaultboneoffsets = {}
-				for i = 0, bonecount - 1 do
-					local newentry = {}
-					local ourmatr = self.csmodel:GetBoneMatrix(i)
-					local parentboneid = self.csmodel:GetBoneParent(i)
-					if parentboneid and parentboneid != -1 then
-						//Get the bone's offset from its parent
-						local parentmatr = self.csmodel:GetBoneMatrix(parentboneid)
-						if ourmatr == nil then return end  //TODO: why does this happen? does the model need to be precached or something?
-						newentry["posoffset"], newentry["angoffset"] = WorldToLocal(ourmatr:GetTranslation(), ourmatr:GetAngles(), parentmatr:GetTranslation(), parentmatr:GetAngles())
-						newentry["pos"], newentry["ang"] = WorldToLocal(ourmatr:GetTranslation(), ourmatr:GetAngles(), self:GetPos(), self:GetAngles())
-					else
-						//If a bone doesn't have a parent, then get its offset from the model origin
-						ourmatr = self.csmodel:GetBoneMatrix(i)
-						if ourmatr != nil then
-							newentry["posoffset"], newentry["angoffset"] = WorldToLocal(ourmatr:GetTranslation(), ourmatr:GetAngles(), self.csmodel:GetPos(), self.csmodel:GetAngles())
-							newentry["pos"], newentry["ang"] = WorldToLocal(ourmatr:GetTranslation(), ourmatr:GetAngles(), self:GetPos(), self:GetAngles())
-						end
-					end
-					if !newentry["posoffset"] then //note: if we end up using this placeholder table for the root bone, then remapping kind of sucks, but it's better than nothing i guess
-						newentry["posoffset"] = Vector(0,0,0)
-						newentry["angoffset"] = Angle(0,0,0)
-						newentry["pos"] = Vector(0,0,0)
-						newentry["ang"] = Angle(0,0,0)
-					end
-					table.insert(defaultboneoffsets, i, newentry)
-				end
-
-				self.RemapInfo_DefaultBoneOffsets = defaultboneoffsets
-
-				//We'll remove the clientside model in our Think hook, because doing it here can cause a crash
-				self.csmodeltoremove = self.csmodel
-				self.csmodel = nil
 			end
+			self.csmodel:DrawModel()
+			self.csmodel:SetupBones()
+			self.csmodel:InvalidateBoneCache()
+			if self.csmodel and self.csmodel:GetBoneMatrix(0) == nil and self.csmodel:GetBoneMatrix(bonecount - 1) == nil then return end //the csmodel might need a frame or so to start returning the matrices; on some models like office workers from Black Mesa Character Expansion (https://steamcommunity.com/sharedfiles/filedetails/?id=2082334251), this always returns nil for the root bone but still works for the others, so make sure we check more than one bone
 
-			if !self.AdvBone_BoneInfo then return end
-
-			local parent = self:GetParent()
-			if !IsValid(parent) then
-				if table.Count(self.AdvBone_BoneManips) == 0 and !IsValid(self:GetPuppeteer()) then return end
-				parent = nil
-			else
-				if parent.AttachedEntity then parent = parent.AttachedEntity end
-				parent:SetLOD(0)
-			end
-
-			//This function is expensive, so make sure we aren't running it more often than we need to
-			if !self.IsPuppeteer then
-				local skip = false
-				if self.LastBuildBonePositionsTime >= curtime then
-					//If we've already run this function this frame (i.e. entity is getting drawn more than once) then skip
-					skip = true
+			local defaultboneoffsets = {}
+			for i = 0, bonecount - 1 do
+				local newentry = {}
+				local ourmatr = self.csmodel:GetBoneMatrix(i)
+				local parentboneid = self.csmodel:GetBoneParent(i)
+				if parentboneid and parentboneid != -1 then
+					//Get the bone's offset from its parent
+					local parentmatr = self.csmodel:GetBoneMatrix(parentboneid)
+					if ourmatr == nil then return end  //TODO: why does this happen? does the model need to be precached or something?
+					newentry["posoffset"], newentry["angoffset"] = WorldToLocal(ourmatr:GetTranslation(), ourmatr:GetAngles(), parentmatr:GetTranslation(), parentmatr:GetAngles())
+					newentry["pos"], newentry["ang"] = WorldToLocal(ourmatr:GetTranslation(), ourmatr:GetAngles(), self:GetPos(), self:GetAngles())
 				else
-					self.LastBuildBonePositionsTime = curtime
+					//If a bone doesn't have a parent, then get its offset from the model origin
+					ourmatr = self.csmodel:GetBoneMatrix(i)
+					if ourmatr != nil then
+						newentry["posoffset"], newentry["angoffset"] = WorldToLocal(ourmatr:GetTranslation(), ourmatr:GetAngles(), self.csmodel:GetPos(), self.csmodel:GetAngles())
+						newentry["pos"], newentry["ang"] = WorldToLocal(ourmatr:GetTranslation(), ourmatr:GetAngles(), self:GetPos(), self:GetAngles())
+					end
+				end
+				if !newentry["posoffset"] then //note: if we end up using this placeholder table for the root bone, then remapping kind of sucks, but it's better than nothing i guess
+					newentry["posoffset"] = Vector(0,0,0)
+					newentry["angoffset"] = Angle(0,0,0)
+					newentry["pos"] = Vector(0,0,0)
+					newentry["ang"] = Angle(0,0,0)
+				end
+				table.insert(defaultboneoffsets, i, newentry)
+			end
 
-					//If our bones haven't changed position in a while, then fall asleep and skip until one of our parent's bones moves,
-					//or until we/our parent get bonemanipped (see ent_advbonemerge function overrides)
-					//This check isn't the cheapest, but it's still a whole lot better than updating all our bones.
-					//Because prop_animated moves of its own accord unlike ent_advbonemerge, and might even be unparented, it also resets this value upon updating its pos/ang, animation, 
-					//scale, or pose parameters, in various places in this file.
-					//Also make sure SavedBoneMatrices isn't empty, so we don't start skipping before we've actually built our bone positions
-					//(can happen with animprops that spawn offscreen, only seems to happen with unmerged props so no need to add this to ent_advbonemerge)
-					if !self:GetControlMovementPoseParams() and !table.IsEmpty(self.SavedBoneMatrices) and self.LastBoneChangeTime + (FrameTime() * 10) < curtime then
-						if !parent or (parent.AdvBone_LastParentBoneCheckTime and parent.AdvBone_LastParentBoneCheckTime >= curtime) then
-							//This check only needs to be performed once per frame, even if there are multiple models merged to one parent
-							skip = true
-						else
-							//Don't bother doing this if the parent has significantly more bones than we do
-							local parbonecount = parent:GetBoneCount()
-							if parbonecount / 2 <= bonecount then
-								local parentbones = {}
-								for i = -1, parbonecount - 1 do
-									local matr = parent:GetBoneMatrix(i)
-									if ismatrix(matr) then
-										//parentbones[i] = matr:ToTable() //this func suuucks for perf when there's a lot at once
-										local t = matr:GetTranslation()
-										local a = matr:GetAngles()
-										parentbones[i] = {
-											//These values are sloppy; bones that move procedurally from jigglebones or IK always return a slightly
-											//different value each frame, so round to the nearest hammer unit
-											[1] = math.Round(t.x),
-											[2] = math.Round(t.y),
-											[3] = math.Round(t.z),
-											[4] = math.Round(a.x),
-											[5] = math.Round(a.y),
-											[6] = math.Round(a.z),
-										}
-									end
+			self.RemapInfo_DefaultBoneOffsets = defaultboneoffsets
+
+			//We'll remove the clientside model in our Think hook, because doing it here can cause a crash
+			self.csmodeltoremove = self.csmodel
+			self.csmodel = nil
+		end
+
+		if !self.AdvBone_BoneInfo then return end
+
+		local parent = self:GetParent()
+		if !IsValid(parent) then
+			if table.Count(self.AdvBone_BoneManips) == 0 and !IsValid(self:GetPuppeteer()) then return end
+			parent = nil
+		else
+			if parent.AttachedEntity then parent = parent.AttachedEntity end
+			parent:SetLOD(0)
+		end
+
+		//This function is expensive, so make sure we aren't running it more often than we need to
+		if !self.IsPuppeteer then
+			local skip = false
+			if self.LastBuildBonePositionsTime >= curtime then
+				//If we've already run this function this frame (i.e. entity is getting drawn more than once) then skip
+				skip = true
+			else
+				self.LastBuildBonePositionsTime = curtime
+
+				//If our bones haven't changed position in a while, then fall asleep and skip until one of our parent's bones moves,
+				//or until we/our parent get bonemanipped (see ent_advbonemerge function overrides)
+				//This check isn't the cheapest, but it's still a whole lot better than updating all our bones.
+				//Because prop_animated moves of its own accord unlike ent_advbonemerge, and might even be unparented, it also resets this value upon updating its pos/ang, animation, 
+				//scale, or pose parameters, in various places in this file.
+				//Also make sure SavedBoneMatrices isn't empty, so we don't start skipping before we've actually built our bone positions
+				//(can happen with animprops that spawn offscreen, only seems to happen with unmerged props so no need to add this to ent_advbonemerge)
+				if !self:GetControlMovementPoseParams() and !table.IsEmpty(self.SavedBoneMatrices) and self.LastBoneChangeTime + (FrameTime() * 10) < curtime then
+					if !parent or (parent.AdvBone_LastParentBoneCheckTime and parent.AdvBone_LastParentBoneCheckTime >= curtime) then
+						//This check only needs to be performed once per frame, even if there are multiple models merged to one parent
+						skip = true
+					else
+						//Don't bother doing this if the parent has significantly more bones than we do
+						local parbonecount = parent:GetBoneCount()
+						if parbonecount / 2 <= bonecount then
+							local parentbones = {}
+							for i = -1, parbonecount - 1 do
+								local matr = parent:GetBoneMatrix(i)
+								if ismatrix(matr) then
+									//parentbones[i] = matr:ToTable() //this func suuucks for perf when there's a lot at once
+									local t = matr:GetTranslation()
+									local a = matr:GetAngles()
+									parentbones[i] = {
+										//These values are sloppy; bones that move procedurally from jigglebones or IK always return a slightly
+										//different value each frame, so round to the nearest hammer unit
+										[1] = math.Round(t.x),
+										[2] = math.Round(t.y),
+										[3] = math.Round(t.z),
+										[4] = math.Round(a.x),
+										[5] = math.Round(a.y),
+										[6] = math.Round(a.z),
+									}
 								end
+							end
 
-								if self.SavedParentBoneMatrices then
-									local ParentNoChange = true
-									for k, v in pairs (self.SavedParentBoneMatrices) do
-										if !parentbones[k] then
-											ParentNoChange = false
-										elseif ParentNoChange then
-											for k2, v2 in pairs (v) do
-												if ParentNoChange then
-													if v2 != parentbones[k][k2] then
-														ParentNoChange = false
-														break
-													end
-												else
+							if self.SavedParentBoneMatrices then
+								local ParentNoChange = true
+								for k, v in pairs (self.SavedParentBoneMatrices) do
+									if !parentbones[k] then
+										ParentNoChange = false
+									elseif ParentNoChange then
+										for k2, v2 in pairs (v) do
+											if ParentNoChange then
+												if v2 != parentbones[k][k2] then
+													ParentNoChange = false
 													break
 												end
+											else
+												break
 											end
 										end
 									end
-									//MsgN(self:GetModel(), " ParentNoChange = ", ParentNoChange)
-									if !ParentNoChange then
-										self.LastBoneChangeTime = curtime
-										self.SavedParentBoneMatrices = nil
-									else
-										//MsgN(self, " ", ParentNoChange)
-										skip = true
-										parent.AdvBone_LastParentBoneCheckTime = curtime
-									end
-
-								else
-									self.SavedParentBoneMatrices = parentbones
 								end
+								//MsgN(self:GetModel(), " ParentNoChange = ", ParentNoChange)
+								if !ParentNoChange then
+									self.LastBoneChangeTime = curtime
+									self.SavedParentBoneMatrices = nil
+								else
+									//MsgN(self, " ", ParentNoChange)
+									skip = true
+									parent.AdvBone_LastParentBoneCheckTime = curtime
+								end
+
+							else
+								self.SavedParentBoneMatrices = parentbones
 							end
 						end
-					else
-						self.SavedParentBoneMatrices = nil
+					end
+				else
+					self.SavedParentBoneMatrices = nil
+				end
+			end
+
+			//TEST: Display sleep status
+			--[[if skip then
+				self:SetColor( Color(255,0,0,255) )
+			else
+				self:SetColor( Color(0,255,0,255) )
+			end]]
+			//If we're going to skip, then use cached bone matrices instead of computing new ones, and stop here
+			if skip then
+				if parent and self.AdvBone_OriginMatrix then
+					local matr = self.AdvBone_OriginMatrix
+					//Move our actual model origin with the origin control
+					self:SetPos(matr:GetTranslation())
+					self:SetAngles(self.AdvBone_Angs[-1] or matr:GetAngles())
+					//Also move our render origin - setpos alone is unreliable since the position can get reasserted if the parent moves or something like that
+					self:SetRenderOrigin(matr:GetTranslation())
+					self:SetRenderAngles(self.AdvBone_Angs[-1] or matr:GetAngles())
+				end
+				for i = 0, bonecount - 1 do
+					if self.SavedBoneMatrices and self.SavedBoneMatrices[i] and self:GetBoneName(i) != "__INVALIDBONE__" then
+						self:SetBoneMatrix(i, self.SavedBoneMatrices[i])
+					end
+				end
+				return
+			end
+		end
+		//TODO: currently, puppeteers can't fall asleep, because they don't generate bone matrices to check for changes on.
+		//figure out a way to let puppeteers fall asleep, by checking if their boneoffsets have changed or something?
+
+
+
+
+
+		//TODO: Animated props can have a different scale than their parent entity. Are there any situations where we should be using the parent's scale instead of our scale?
+		local mdlscl = math.Round(self:GetModelScale(),4) //we need to round these values or else the game won't think they're equal
+		local mdlsclvec = Vector(mdlscl,mdlscl,mdlscl)
+
+		local puppeteer = self:GetPuppeteer()
+		if !IsValid(puppeteer) or !self.RemapInfo then puppeteer = nil end
+
+		//Note: self.RemapInfo_DefaultBoneOffsets table creation was here until we moved it to the top of the function so ragdollize could use it
+
+		//Remapping: Don't remap until the puppeteer has run its buildbonepositions function
+		if puppeteer and (!puppeteer.RemapInfo_DefaultBoneOffsets or !puppeteer.BoneOffsets) then puppeteer = nil end
+
+		//Remapping: Get the offset of each remapped bone from its target bone
+		if puppeteer and !self.RemapInfo_RemapAngOffsets then
+			//First, get the bone matrices of a reference-posed parent, but with RemapInfo ang applied
+			local ref = {}
+			for i, entry in pairs (self.RemapInfo_DefaultBoneOffsets) do
+				local matr = Matrix()
+				//TODO: This won't work properly if this bone's id is lower than its parent's id, is that possible?
+				local parentboneid = self:GetBoneParent(i)
+				if ref[parentboneid] then
+					matr:Set(ref[parentboneid])
+				end
+				//matr:Translate(self.RemapInfo_DefaultBoneOffsets[i]["posoffset"]) //pos isn't necessary here
+				matr:Rotate(self.RemapInfo_DefaultBoneOffsets[i]["angoffset"])
+				matr:Rotate(self.RemapInfo[i]["ang"])
+				ref[i] = matr
+			end
+
+			//Next, get the angle diff between each remapped bone and its target
+			local remapangoffsets = {}
+			for k, v in pairs (self.RemapInfo) do
+				local remapboneid = puppeteer:LookupBone(self.RemapInfo[k].parent)
+				if remapboneid then
+					local _, ang = WorldToLocal(ref[k]:GetTranslation(), ref[k]:GetAngles(), puppeteer.RemapInfo_DefaultBoneOffsets[remapboneid]["pos"], puppeteer.RemapInfo_DefaultBoneOffsets[remapboneid]["ang"])
+					remapangoffsets[k] = ang
+				end
+			end
+			self.RemapInfo_RemapAngOffsets = remapangoffsets
+		end
+
+		//Get each bone's offset from its parent bone - we have to handle all this differently than standard advbonemerged ents
+		//because the animations are constantly moving the bones around
+		local boneoffsets = {}
+		local bonemins, bonemaxs = nil, nil
+		for i = 0, bonecount - 1 do
+			local ourmatr = self:GetBoneMatrix(i)
+
+			//We don't need to get the offset for bones that are attached to something, because those ones won't animate (unless we're remapping it, in which case we need it for later)
+			local targetboneid = nil
+			if parent then targetboneid = parent:LookupBone(self.AdvBone_BoneInfo[i].parent) end
+			if !targetboneid or (puppeteer and puppeteer:LookupBone(self.RemapInfo[i]["parent"])) then  //TODO: from the testing we've done, remapping SEEMS to be okay if we don't have boneoffsets for nonremapped merged bones, but are there any weird edge cases we haven't found?
+				local newentry = {}
+				local parentboneid = self:GetBoneParent(i)
+				if parentboneid and parentboneid != -1 then
+					//Get the bone's offset from its parent
+					local parentmatr = self:GetBoneMatrix(parentboneid)
+					if ourmatr == nil then return end //TODO: why does this happen? does the model need to be precached or something?
+					newentry["posoffset"], newentry["angoffset"] = WorldToLocal(ourmatr:GetTranslation(), ourmatr:GetAngles(), parentmatr:GetTranslation(), parentmatr:GetAngles())
+				else
+					//If a bone doesn't have a parent, then get its offset from the model origin
+					if ourmatr != nil then
+						newentry["posoffset"], newentry["angoffset"] = WorldToLocal(ourmatr:GetTranslation(), ourmatr:GetAngles(), self:GetPos(), self:GetAngles())
 					end
 				end
 
-				//TEST: Display sleep status
-				--[[if skip then
-					self:SetColor( Color(255,0,0,255) )
+				if !newentry["posoffset"] then
+					newentry["posoffset"] = Vector(0,0,0)
+					newentry["angoffset"] = Angle(0,0,0)
 				else
-					self:SetColor( Color(0,255,0,255) )
-				end]]
-				//If we're going to skip, then use cached bone matrices instead of computing new ones, and stop here
-				if skip then
-					if parent and self.AdvBone_OriginMatrix then
-						local matr = self.AdvBone_OriginMatrix
+					newentry["posoffset"]:Div(mdlscl)
+				end
+				table.insert(boneoffsets, i, newentry)
+			end
+
+			if !self.IsPuppeteer and ourmatr then
+				//Get the min and max positions of our bones ("bone bounds") for our render bounds calculation to use
+				local bonepos = WorldToLocal(ourmatr:GetTranslation(), Angle(), self:GetPos(), self:GetAngles())
+				if !bonemins and !bonemaxs then
+					bonemins = Vector()
+					bonemaxs = Vector()
+					bonemins:Set(bonepos)
+					bonemaxs:Set(bonepos)
+				else
+					bonemins.x = math.min(bonepos.x,bonemins.x)
+					bonemins.y = math.min(bonepos.y,bonemins.y)
+					bonemins.z = math.min(bonepos.z,bonemins.z)
+					bonemaxs.x = math.max(bonepos.x,bonemaxs.x)
+					bonemaxs.y = math.max(bonepos.y,bonemaxs.y)
+					bonemaxs.z = math.max(bonepos.z,bonemaxs.z)
+				end
+			end
+		end
+
+		//Remapping: If we're a puppeteer, then store the table so our parent can access its values
+		if self.IsPuppeteer then
+			self.BoneOffsets = boneoffsets
+		//Remapping: Create new boneoffsets for remapped bones, based off of an imaginary model where all remapped bones are moved/rotated to match their corresponding puppeteer bone.
+		//These will be applied to the model in place of the normal boneoffsets.
+		elseif puppeteer then
+			local ref = {}
+			for i, entry in pairs (boneoffsets) do
+				local remapbonematr = nil
+				local remapboneid = puppeteer:LookupBone(self.RemapInfo[i].parent)
+				if remapboneid then
+					remapbonematr = puppeteer:GetBoneMatrix(remapboneid)
+				end
+
+				local matr = Matrix()
+				//TODO: This won't work properly if this bone's id is lower than its parent's id, is that possible?
+				local parentboneid = self:GetBoneParent(i)
+				if ref[parentboneid] then
+					matr:Set(ref[parentboneid])
+				else
+					matr:SetTranslation(self:GetPos())
+					matr:SetAngles(self:GetAngles())
+					//matr:SetTranslation(puppeteer:GetPos())
+					//matr:SetAngles(puppeteer:GetAngles())
+				end
+
+				matr:Translate(boneoffsets[i]["posoffset"])
+				if remapbonematr then
+					local diff_pos = puppeteer.BoneOffsets[remapboneid]["posoffset"] - puppeteer.RemapInfo_DefaultBoneOffsets[remapboneid]["posoffset"]
+					matr:Translate(diff_pos)
+					matr:SetAngles(remapbonematr:GetAngles())
+					matr:Rotate(self.RemapInfo_RemapAngOffsets[i])
+				else
+					matr:Rotate(boneoffsets[i]["angoffset"])
+				end
+
+				if remapbonematr then
+					local newentry = {}
+					if ref[parentboneid] then
+						//Get the bone's offset from its parent
+						newentry["posoffset"], newentry["angoffset"] = WorldToLocal(matr:GetTranslation(), matr:GetAngles(), ref[parentboneid]:GetTranslation(), ref[parentboneid]:GetAngles())
+					else
+						//If a bone doesn't have a parent, then get its offset from the model origin
+						newentry["posoffset"], newentry["angoffset"] = WorldToLocal(matr:GetTranslation(), matr:GetAngles(), self:GetPos(), self:GetAngles())
+					end
+					boneoffsets[i] = newentry
+				end
+
+				ref[i] = matr
+			end
+		end
+
+		if !self.IsPuppeteer and !self.AdvBone_BoneHitBoxes then //Fallback in  case we don't have any hitboxes to use for render bounds
+			//Calculate the amount of extra "bloat" to put around our bones when setting our render bounds
+			local modelmins, modelmaxs = self:GetModelRenderBounds()
+			//Get the largest amount of space between the bone and model bounds and use that as our bloat value - we have to use the largest size on all axes since players can 
+			//rotate the model and bones however they please. If the bone bounds are somehow bigger than the model bounds, then use 0 instead.
+			self.AdvBone_RenderBounds_Bloat = math.max(0, -(modelmins.x - bonemins.x), -(modelmins.y - bonemins.y), -(modelmins.z - bonemins.z), (modelmaxs.x - bonemaxs.x), (modelmaxs.y - bonemaxs.y), (modelmaxs.z - bonemaxs.z))
+		end
+
+
+
+
+
+		//these will be used to set our render bounds accordingly in the clientside think function
+		local highestbonescale = 0
+		local bonemins, bonemaxs = nil, nil
+
+		//scaling a matrix down can distort its angles (or remove them entirely if scaled down to 0), so whenever we scale a matrix, we'll store its non-scaled angles in here first. 
+		//whenever another bone wants to follow that matrix but NOT scale with it, it'll use the stored angles from this table instead.
+		self.AdvBone_Angs = {}
+
+		//check if the bone matrices have changed at all since the last call
+		local BonesHaveChanged = false
+
+		if self.IsPuppeteer then return end //puppeteer is never going to have any manips or any boneinfo telling it to merge, so we can stop here
+		for i = -1, bonecount - 1 do
+
+			local matr = nil
+			local targetboneid = nil
+			if parent then targetboneid = parent:LookupBone(self.AdvBone_BoneInfo[i].parent) end
+			if targetboneid then
+
+				//Set our bone to the matrix of its target bone on the other model
+
+				local targetmatr = parent:GetBoneMatrix(targetboneid)
+				if targetmatr then
+
+					if parent.AdvBone_StaticPropMatrix and self.AdvBone_BoneInfo[i].parent == "static_prop" then
+						//The static_prop workaround uses some nonsense with EnableMatrix/RenderMultiply to work, so the matrix we retrieve here 
+						//won't have the right angles or scale. Use a stored matrix with the proper values instead.
+						targetmatr:Set(parent.AdvBone_StaticPropMatrix)
+					end
+
+					matr = targetmatr
+
+					if (self.AdvBone_BoneInfo[i].scale == false) then
+						//Since we don't want to use the target bone's scale, rescale the matrix so it's back to normal
+						matr:SetScale(mdlsclvec)  //we still want to inherit the overall model scale for things like npcs and animated props
+
+						if parent.AdvBone_Angs and parent.AdvBone_Angs[targetboneid] then
+							//Use our target bone's stored angles if possible
+							matr:SetAngles(parent.AdvBone_Angs[targetboneid])
+						end
+
+						//If the target bone's scale is under 0.04 on any axis, then we can't scale it back up properly, so let's fix that
+						//We can't just create a new matrix instead and copy over the translation and angles, since 0-scale matrices lose their angle info
+						local scalevec = parent:GetManipulateBoneScale(targetboneid)
+						local scalefix = false
+						if scalevec.x < 0.04 then scalevec.x = 0.05 scalefix = true end
+						if scalevec.y < 0.04 then scalevec.y = 0.05 scalefix = true end
+						if scalevec.z < 0.04 then scalevec.z = 0.05 scalefix = true end
+						if scalefix == true then parent:ManipulateBoneScale(targetboneid,scalevec) end
+					else
+						//Store a non-scaled version of our angles if we're scaling with our target bone
+						local matrscl = matr:GetScale()
+						if Vector(math.Round(matrscl.x,4), math.Round(matrscl.y,4), math.Round(matrscl.z,4)) != mdlsclvec then
+							if parent.AdvBone_Angs and parent.AdvBone_Angs[targetboneid] then
+								//Use our target bone's stored angles (plus our ang manip) as our own stored angles if possible
+								local angmatr = Matrix()
+								angmatr:SetAngles(parent.AdvBone_Angs[targetboneid])
+								angmatr:Rotate(self:GetManipulateBoneAngles(i))
+								self.AdvBone_Angs[i] = angmatr:GetAngles()
+								angmatr = nil
+							else
+								//Otherwise, rescale the matrix so it's back to normal and store those angles (plus our ang manip)
+								local angmatr = Matrix()
+								angmatr:Set(matr)
+								angmatr:SetScale(mdlsclvec)  //we still want to inherit the overall model scale for things like npcs and animated props
+								angmatr:Rotate(self:GetManipulateBoneAngles(i))
+								self.AdvBone_Angs[i] = angmatr:GetAngles()
+								angmatr = nil
+							end
+						end
+					end
+
+					matr:Translate(self:GetManipulateBonePosition(i))
+					matr:Rotate(self:GetManipulateBoneAngles(i))
+				end
+
+			else
+
+				//Set our bone to its "default" position, relative to its parent bone on our model
+
+				if i == -1 then
+					//Create a matrix for the model origin
+					matr = Matrix()
+					//If our origin isn't following a bone, then that means it's actually following the parent's origin, so inherit origin manip stuff from it
+					if parent and parent.AdvBone_OriginMatrix and self.AdvBone_BoneInfo[i].scale != false then
+						matr:Set(parent.AdvBone_OriginMatrix)
+				
+						matr:Translate(self:GetManipulateBonePosition(-1))
+						matr:Rotate(self:GetManipulateBoneAngles(-1))
+
+						//Store a non-scaled version of our angles if we're scaling with the parent origin
+						local matrscl = matr:GetScale()
+						if Vector(math.Round(matrscl.x,4), math.Round(matrscl.y,4), math.Round(matrscl.z,4)) != mdlsclvec then
+							//Use the parent origin's stored angles (plus our ang manip) as our own stored angles if possible
+							if parent.AdvBone_Angs and parent.AdvBone_Angs[-1] then
+								local angmatr = Matrix()
+								angmatr:SetAngles(parent.AdvBone_Angs[-1])
+								angmatr:Rotate(self:GetManipulateBoneAngles(-1))
+								self.AdvBone_Angs[i] = angmatr:GetAngles()
+								angmatr = nil
+							end
+						end
+					else
+						if parent then
+							matr:SetTranslation(parent:GetPos())
+							if parent:IsPlayer() and !parent:InVehicle() then
+								//NOTE: Unlike everything else, ent:GetAngles() on players not in vehicles returns 
+								//the angle they're facing, not the angle of their model origin, so correct this
+								local ang = parent:GetAngles()
+								ang.p = 0
+								matr:SetAngles(ang)
+							else
+								matr:SetAngles(parent:GetAngles())
+							end
+						else
+							matr:SetTranslation(self:GetPos())
+							matr:SetAngles(self:GetAngles())
+						end
+
+						matr:Scale(mdlsclvec)
+
+						//NOTE: Unmerged animprops won't actually move the entity itself with the origin manips,
+						//but all of the other bones will still move with the origin matrix.
+						matr:Translate(self:GetManipulateBonePosition(-1))
+						matr:Rotate(self:GetManipulateBoneAngles(-1))
+					end
+				else
+					local parentmatr = nil
+
+					local parentboneid = self:GetBoneParent(i)
+					if !parentboneid then parentboneid = -1 end
+					if parentboneid != -1 then
+						//Start with the matrix of our parent bone
+						parentmatr = self:GetBoneMatrix(parentboneid)
+					else
+						//Start with the matrix of the model origin
+						parentmatr = Matrix()
+						parentmatr:Set(self.AdvBone_OriginMatrix)
+					end
+			
+					if parentmatr then
+						if (self.AdvBone_BoneInfo[i].scale != false) then
+							//Start off with the parent bone matrix
+							matr = parentmatr
+
+							//Store a non-scaled version of our angles if we're scaling with our parent bone
+							local matrscl = matr:GetScale()
+							if Vector(math.Round(matrscl.x,4), math.Round(matrscl.y,4), math.Round(matrscl.z,4)) != mdlsclvec then
+								local angmatr = Matrix()
+								angmatr:SetAngles(self.AdvBone_Angs[parentboneid] or matr:GetAngles())
+								angmatr:Rotate(boneoffsets[i]["angoffset"])
+								angmatr:Rotate(self:GetManipulateBoneAngles(i))
+								self.AdvBone_Angs[i] = angmatr:GetAngles()
+								angmatr = nil
+							end
+
+							//Apply pos offset
+							matr:Translate(boneoffsets[i]["posoffset"])
+						else
+							//Create a new matrix and just copy over the translation and angle
+							matr = Matrix()
+
+							matr:SetTranslation(parentmatr:GetTranslation())
+							matr:SetAngles(self.AdvBone_Angs[parentboneid] or parentmatr:GetAngles()) //Use our parent bone's stored angles if possible
+
+							matr:SetScale(mdlsclvec)
+
+							if !self.AdvBone_Uninstalled then
+								//Apply pos offset - we still want the offset to be multiplied by the parent bone's scale, even if we're not scaling this bone with it
+								//(our distance from the parent bone should be the same regardless of whether we're scaling with it or not - otherwise we'd
+								//end up embedded inside the parent bone if it was scaled up, or end up far away from it if it was scaled down)
+								local tr1 = parentmatr:GetTranslation()
+								parentmatr:Translate(boneoffsets[i]["posoffset"])
+								local tr2 = parentmatr:GetTranslation()
+								local posoffsetscaled = WorldToLocal(tr2, Angle(), tr1, matr:GetAngles())
+								matr:Translate(posoffsetscaled / mdlscl)
+							else
+								//If the advbonemerge addon is uninstalled, then emulate the default garrymanip behavior, where parent's scale doesn't affect offset
+								//(this code should only be running if we're remapping)
+								matr:Translate(boneoffsets[i]["posoffset"])
+							end
+						end
+
+						//Apply pos manip and ang offset/manip
+						matr:Translate(self:GetManipulateBonePosition(i))
+						matr:Rotate(boneoffsets[i]["angoffset"])
+						matr:Rotate(self:GetManipulateBoneAngles(i))
+					end
+				end
+
+			end
+
+
+			if matr then  //matr can be nil if we're visible but our parent isn't
+
+				//Store a non-scaled version of our angles if we're scaling
+				local scale = self:GetManipulateBoneScale(i)
+				if !self.AdvBone_Angs[i] and scale != Vector(1,1,1) then
+					self.AdvBone_Angs[i] = matr:GetAngles()
+				end
+				//Apply scale manip (if advbonemerge is uninstalled, then garrymanips already handle this, so skip it)
+				if !self.AdvBone_Uninstalled then
+					matr:Scale(scale)
+				end
+
+				if !self.AdvBone_BoneHitBoxes then //used by bloat
+					local ourscale = matr:GetScale()
+					highestbonescale = math.max(ourscale.x,ourscale.y,ourscale.z,highestbonescale)
+				end
+
+				if i == -1 then
+					self.AdvBone_OriginMatrix = matr
+
+					if parent then
 						//Move our actual model origin with the origin control
 						self:SetPos(matr:GetTranslation())
 						self:SetAngles(self.AdvBone_Angs[-1] or matr:GetAngles())
@@ -3675,558 +4078,162 @@ if CLIENT then
 						self:SetRenderOrigin(matr:GetTranslation())
 						self:SetRenderAngles(self.AdvBone_Angs[-1] or matr:GetAngles())
 					end
-					for i = 0, bonecount - 1 do
-						if self.SavedBoneMatrices and self.SavedBoneMatrices[i] and self:GetBoneName(i) != "__INVALIDBONE__" then
-							self:SetBoneMatrix(i, self.SavedBoneMatrices[i])
-						end
-					end
-					return
-				end
-			end
-			//TODO: currently, puppeteers can't fall asleep, because they don't generate bone matrices to check for changes on.
-			//figure out a way to let puppeteers fall asleep, by checking if their boneoffsets have changed or something?
 
-
-
-
-
-			//TODO: Animated props can have a different scale than their parent entity. Are there any situations where we should be using the parent's scale instead of our scale?
-			local mdlscl = math.Round(self:GetModelScale(),4) //we need to round these values or else the game won't think they're equal
-			local mdlsclvec = Vector(mdlscl,mdlscl,mdlscl)
-
-			local puppeteer = self:GetPuppeteer()
-			if !IsValid(puppeteer) or !self.RemapInfo then puppeteer = nil end
-
-			//Note: self.RemapInfo_DefaultBoneOffsets table creation was here until we moved it to the top of the function so ragdollize could use it
-
-			//Remapping: Don't remap until the puppeteer has run its buildbonepositions function
-			if puppeteer and (!puppeteer.RemapInfo_DefaultBoneOffsets or !puppeteer.BoneOffsets) then puppeteer = nil end
-
-			//Remapping: Get the offset of each remapped bone from its target bone
-			if puppeteer and !self.RemapInfo_RemapAngOffsets then
-				//First, get the bone matrices of a reference-posed parent, but with RemapInfo ang applied
-				local ref = {}
-				for i, entry in pairs (self.RemapInfo_DefaultBoneOffsets) do
-					local matr = Matrix()
-					//TODO: This won't work properly if this bone's id is lower than its parent's id, is that possible?
-					local parentboneid = self:GetBoneParent(i)
-					if ref[parentboneid] then
-						matr:Set(ref[parentboneid])
-					end
-					//matr:Translate(self.RemapInfo_DefaultBoneOffsets[i]["posoffset"]) //pos isn't necessary here
-					matr:Rotate(self.RemapInfo_DefaultBoneOffsets[i]["angoffset"])
-					matr:Rotate(self.RemapInfo[i]["ang"])
-					ref[i] = matr
-				end
-
-				//Next, get the angle diff between each remapped bone and its target
-				local remapangoffsets = {}
-				for k, v in pairs (self.RemapInfo) do
-					local remapboneid = puppeteer:LookupBone(self.RemapInfo[k].parent)
-					if remapboneid then
-						local _, ang = WorldToLocal(ref[k]:GetTranslation(), ref[k]:GetAngles(), puppeteer.RemapInfo_DefaultBoneOffsets[remapboneid]["pos"], puppeteer.RemapInfo_DefaultBoneOffsets[remapboneid]["ang"])
-						remapangoffsets[k] = ang
-					end
-				end
-				self.RemapInfo_RemapAngOffsets = remapangoffsets
-			end
-
-			//Get each bone's offset from its parent bone - we have to handle all this differently than standard advbonemerged ents
-			//because the animations are constantly moving the bones around
-			local boneoffsets = {}
-			local bonemins, bonemaxs = nil, nil
-			for i = 0, bonecount - 1 do
-				local ourmatr = self:GetBoneMatrix(i)
-
-				//We don't need to get the offset for bones that are attached to something, because those ones won't animate (unless we're remapping it, in which case we need it for later)
-				local targetboneid = nil
-				if parent then targetboneid = parent:LookupBone(self.AdvBone_BoneInfo[i].parent) end
-				if !targetboneid or (puppeteer and puppeteer:LookupBone(self.RemapInfo[i]["parent"])) then  //TODO: from the testing we've done, remapping SEEMS to be okay if we don't have boneoffsets for nonremapped merged bones, but are there any weird edge cases we haven't found?
-					local newentry = {}
-					local parentboneid = self:GetBoneParent(i)
-					if parentboneid and parentboneid != -1 then
-						//Get the bone's offset from its parent
-						local parentmatr = self:GetBoneMatrix(parentboneid)
-						if ourmatr == nil then return end //TODO: why does this happen? does the model need to be precached or something?
-						newentry["posoffset"], newentry["angoffset"] = WorldToLocal(ourmatr:GetTranslation(), ourmatr:GetAngles(), parentmatr:GetTranslation(), parentmatr:GetAngles())
-					else
-						//If a bone doesn't have a parent, then get its offset from the model origin
-						if ourmatr != nil then
-							newentry["posoffset"], newentry["angoffset"] = WorldToLocal(ourmatr:GetTranslation(), ourmatr:GetAngles(), self:GetPos(), self:GetAngles())
-						end
-					end
-
-					if !newentry["posoffset"] then
-						newentry["posoffset"] = Vector(0,0,0)
-						newentry["angoffset"] = Angle(0,0,0)
-					else
-						newentry["posoffset"]:Div(mdlscl)
-					end
-					table.insert(boneoffsets, i, newentry)
-				end
-
-				if !self.IsPuppeteer and ourmatr then
-					//Get the min and max positions of our bones ("bone bounds") for our render bounds calculation to use
-					local bonepos = WorldToLocal(ourmatr:GetTranslation(), Angle(), self:GetPos(), self:GetAngles())
-					if !bonemins and !bonemaxs then
+					//If we're an effect, then keep our origin in the render bounds so that the effect ring doesn't disappear on models 
+					//where the origin is really far away from the bones
+					if self:GetPhysicsMode() == 2 then
+						local localoriginpos = self.AdvBone_OriginMatrix:GetTranslation() - self:GetPos()
 						bonemins = Vector()
 						bonemaxs = Vector()
-						bonemins:Set(bonepos)
-						bonemaxs:Set(bonepos)
-					else
-						bonemins.x = math.min(bonepos.x,bonemins.x)
-						bonemins.y = math.min(bonepos.y,bonemins.y)
-						bonemins.z = math.min(bonepos.z,bonemins.z)
-						bonemaxs.x = math.max(bonepos.x,bonemaxs.x)
-						bonemaxs.y = math.max(bonepos.y,bonemaxs.y)
-						bonemaxs.z = math.max(bonepos.z,bonemaxs.z)
+						bonemins:Set(localoriginpos)
+						bonemaxs:Set(localoriginpos)
 					end
-				end
-			end
-
-			//Remapping: If we're a puppeteer, then store the table so our parent can access its values
-			if self.IsPuppeteer then
-				self.BoneOffsets = boneoffsets
-			//Remapping: Create new boneoffsets for remapped bones, based off of an imaginary model where all remapped bones are moved/rotated to match their corresponding puppeteer bone.
-			//These will be applied to the model in place of the normal boneoffsets.
-			elseif puppeteer then
-				local ref = {}
-				for i, entry in pairs (boneoffsets) do
-					local remapbonematr = nil
-					local remapboneid = puppeteer:LookupBone(self.RemapInfo[i].parent)
-					if remapboneid then
-						remapbonematr = puppeteer:GetBoneMatrix(remapboneid)
-					end
-
-					local matr = Matrix()
-					//TODO: This won't work properly if this bone's id is lower than its parent's id, is that possible?
-					local parentboneid = self:GetBoneParent(i)
-					if ref[parentboneid] then
-						matr:Set(ref[parentboneid])
-					else
-						matr:SetTranslation(self:GetPos())
-						matr:SetAngles(self:GetAngles())
-						//matr:SetTranslation(puppeteer:GetPos())
-						//matr:SetAngles(puppeteer:GetAngles())
-					end
-
-					matr:Translate(boneoffsets[i]["posoffset"])
-					if remapbonematr then
-						local diff_pos = puppeteer.BoneOffsets[remapboneid]["posoffset"] - puppeteer.RemapInfo_DefaultBoneOffsets[remapboneid]["posoffset"]
-						matr:Translate(diff_pos)
-						matr:SetAngles(remapbonematr:GetAngles())
-						matr:Rotate(self.RemapInfo_RemapAngOffsets[i])
-					else
-						matr:Rotate(boneoffsets[i]["angoffset"])
-					end
-
-					if remapbonematr then
-						local newentry = {}
-						if ref[parentboneid] then
-							//Get the bone's offset from its parent
-							newentry["posoffset"], newentry["angoffset"] = WorldToLocal(matr:GetTranslation(), matr:GetAngles(), ref[parentboneid]:GetTranslation(), ref[parentboneid]:GetAngles())
-						else
-							//If a bone doesn't have a parent, then get its offset from the model origin
-							newentry["posoffset"], newentry["angoffset"] = WorldToLocal(matr:GetTranslation(), matr:GetAngles(), self:GetPos(), self:GetAngles())
-						end
-						boneoffsets[i] = newentry
-					end
-
-					ref[i] = matr
-				end
-			end
-
-			if !self.IsPuppeteer and !self.AdvBone_BoneHitBoxes then //Fallback in  case we don't have any hitboxes to use for render bounds
-				//Calculate the amount of extra "bloat" to put around our bones when setting our render bounds
-				local modelmins, modelmaxs = self:GetModelRenderBounds()
-				//Get the largest amount of space between the bone and model bounds and use that as our bloat value - we have to use the largest size on all axes since players can 
-				//rotate the model and bones however they please. If the bone bounds are somehow bigger than the model bounds, then use 0 instead.
-				self.AdvBone_RenderBounds_Bloat = math.max(0, -(modelmins.x - bonemins.x), -(modelmins.y - bonemins.y), -(modelmins.z - bonemins.z), (modelmaxs.x - bonemaxs.x), (modelmaxs.y - bonemaxs.y), (modelmaxs.z - bonemaxs.z))
-			end
-
-
-
-
-
-			//these will be used to set our render bounds accordingly in the clientside think function
-			local highestbonescale = 0
-			local bonemins, bonemaxs = nil, nil
-
-			//scaling a matrix down can distort its angles (or remove them entirely if scaled down to 0), so whenever we scale a matrix, we'll store its non-scaled angles in here first. 
-			//whenever another bone wants to follow that matrix but NOT scale with it, it'll use the stored angles from this table instead.
-			self.AdvBone_Angs = {}
-
-			//check if the bone matrices have changed at all since the last call
-			local BonesHaveChanged = false
-
-			if self.IsPuppeteer then return end //puppeteer is never going to have any manips or any boneinfo telling it to merge, so we can stop here
-			for i = -1, bonecount - 1 do
-
-				local matr = nil
-				local targetboneid = nil
-				if parent then targetboneid = parent:LookupBone(self.AdvBone_BoneInfo[i].parent) end
-				if targetboneid then
-
-					//Set our bone to the matrix of its target bone on the other model
-
-					local targetmatr = parent:GetBoneMatrix(targetboneid)
-					if targetmatr then
-
-						if parent.AdvBone_StaticPropMatrix and self.AdvBone_BoneInfo[i].parent == "static_prop" then
-							//The static_prop workaround uses some nonsense with EnableMatrix/RenderMultiply to work, so the matrix we retrieve here 
-							//won't have the right angles or scale. Use a stored matrix with the proper values instead.
-							targetmatr:Set(parent.AdvBone_StaticPropMatrix)
-						end
-
-						matr = targetmatr
-
-						if (self.AdvBone_BoneInfo[i].scale == false) then
-							//Since we don't want to use the target bone's scale, rescale the matrix so it's back to normal
-							matr:SetScale(mdlsclvec)  //we still want to inherit the overall model scale for things like npcs and animated props
-
-							if parent.AdvBone_Angs and parent.AdvBone_Angs[targetboneid] then
-								//Use our target bone's stored angles if possible
-								matr:SetAngles(parent.AdvBone_Angs[targetboneid])
-							end
-
-							//If the target bone's scale is under 0.04 on any axis, then we can't scale it back up properly, so let's fix that
-							//We can't just create a new matrix instead and copy over the translation and angles, since 0-scale matrices lose their angle info
-							local scalevec = parent:GetManipulateBoneScale(targetboneid)
-							local scalefix = false
-							if scalevec.x < 0.04 then scalevec.x = 0.05 scalefix = true end
-							if scalevec.y < 0.04 then scalevec.y = 0.05 scalefix = true end
-							if scalevec.z < 0.04 then scalevec.z = 0.05 scalefix = true end
-							if scalefix == true then parent:ManipulateBoneScale(targetboneid,scalevec) end
-						else
-							//Store a non-scaled version of our angles if we're scaling with our target bone
-							local matrscl = matr:GetScale()
-							if Vector(math.Round(matrscl.x,4), math.Round(matrscl.y,4), math.Round(matrscl.z,4)) != mdlsclvec then
-								if parent.AdvBone_Angs and parent.AdvBone_Angs[targetboneid] then
-									//Use our target bone's stored angles (plus our ang manip) as our own stored angles if possible
-									local angmatr = Matrix()
-									angmatr:SetAngles(parent.AdvBone_Angs[targetboneid])
-									angmatr:Rotate(self:GetManipulateBoneAngles(i))
-									self.AdvBone_Angs[i] = angmatr:GetAngles()
-									angmatr = nil
-								else
-									//Otherwise, rescale the matrix so it's back to normal and store those angles (plus our ang manip)
-									local angmatr = Matrix()
-									angmatr:Set(matr)
-									angmatr:SetScale(mdlsclvec)  //we still want to inherit the overall model scale for things like npcs and animated props
-									angmatr:Rotate(self:GetManipulateBoneAngles(i))
-									self.AdvBone_Angs[i] = angmatr:GetAngles()
-									angmatr = nil
-								end
-							end
-						end
-
-						matr:Translate(self:GetManipulateBonePosition(i))
-						matr:Rotate(self:GetManipulateBoneAngles(i))
-					end
-
 				else
-
-					//Set our bone to its "default" position, relative to its parent bone on our model
-
-					if i == -1 then
-						//Create a matrix for the model origin
-						matr = Matrix()
-						//If our origin isn't following a bone, then that means it's actually following the parent's origin, so inherit origin manip stuff from it
-						if parent and parent.AdvBone_OriginMatrix and self.AdvBone_BoneInfo[i].scale != false then
-							matr:Set(parent.AdvBone_OriginMatrix)
-					
-							matr:Translate(self:GetManipulateBonePosition(-1))
-							matr:Rotate(self:GetManipulateBoneAngles(-1))
-
-							//Store a non-scaled version of our angles if we're scaling with the parent origin
-							local matrscl = matr:GetScale()
-							if Vector(math.Round(matrscl.x,4), math.Round(matrscl.y,4), math.Round(matrscl.z,4)) != mdlsclvec then
-								//Use the parent origin's stored angles (plus our ang manip) as our own stored angles if possible
-								if parent.AdvBone_Angs and parent.AdvBone_Angs[-1] then
-									local angmatr = Matrix()
-									angmatr:SetAngles(parent.AdvBone_Angs[-1])
-									angmatr:Rotate(self:GetManipulateBoneAngles(-1))
-									self.AdvBone_Angs[i] = angmatr:GetAngles()
-									angmatr = nil
-								end
-							end
-						else
-							if parent then
-								matr:SetTranslation(parent:GetPos())
-								if parent:IsPlayer() and !parent:InVehicle() then
-									//NOTE: Unlike everything else, ent:GetAngles() on players not in vehicles returns 
-									//the angle they're facing, not the angle of their model origin, so correct this
-									local ang = parent:GetAngles()
-									ang.p = 0
-									matr:SetAngles(ang)
-								else
-									matr:SetAngles(parent:GetAngles())
-								end
-							else
-								matr:SetTranslation(self:GetPos())
-								matr:SetAngles(self:GetAngles())
-							end
-
-							matr:Scale(mdlsclvec)
-
-							//NOTE: Unmerged animprops won't actually move the entity itself with the origin manips,
-							//but all of the other bones will still move with the origin matrix.
-							matr:Translate(self:GetManipulateBonePosition(-1))
-							matr:Rotate(self:GetManipulateBoneAngles(-1))
-						end
-					else
-						local parentmatr = nil
-
-						local parentboneid = self:GetBoneParent(i)
-						if !parentboneid then parentboneid = -1 end
-						if parentboneid != -1 then
-							//Start with the matrix of our parent bone
-							parentmatr = self:GetBoneMatrix(parentboneid)
-						else
-							//Start with the matrix of the model origin
-							parentmatr = Matrix()
-							parentmatr:Set(self.AdvBone_OriginMatrix)
-						end
-				
-						if parentmatr then
-							if (self.AdvBone_BoneInfo[i].scale != false) then
-								//Start off with the parent bone matrix
-								matr = parentmatr
-
-								//Store a non-scaled version of our angles if we're scaling with our parent bone
-								local matrscl = matr:GetScale()
-								if Vector(math.Round(matrscl.x,4), math.Round(matrscl.y,4), math.Round(matrscl.z,4)) != mdlsclvec then
-									local angmatr = Matrix()
-									angmatr:SetAngles(self.AdvBone_Angs[parentboneid] or matr:GetAngles())
-									angmatr:Rotate(boneoffsets[i]["angoffset"])
-									angmatr:Rotate(self:GetManipulateBoneAngles(i))
-									self.AdvBone_Angs[i] = angmatr:GetAngles()
-									angmatr = nil
-								end
-
-								//Apply pos offset
-								matr:Translate(boneoffsets[i]["posoffset"])
-							else
-								//Create a new matrix and just copy over the translation and angle
-								matr = Matrix()
-
-								matr:SetTranslation(parentmatr:GetTranslation())
-								matr:SetAngles(self.AdvBone_Angs[parentboneid] or parentmatr:GetAngles()) //Use our parent bone's stored angles if possible
-
-								matr:SetScale(mdlsclvec)
-
-								if !self.AdvBone_Uninstalled then
-									//Apply pos offset - we still want the offset to be multiplied by the parent bone's scale, even if we're not scaling this bone with it
-									//(our distance from the parent bone should be the same regardless of whether we're scaling with it or not - otherwise we'd
-									//end up embedded inside the parent bone if it was scaled up, or end up far away from it if it was scaled down)
-									local tr1 = parentmatr:GetTranslation()
-									parentmatr:Translate(boneoffsets[i]["posoffset"])
-									local tr2 = parentmatr:GetTranslation()
-									local posoffsetscaled = WorldToLocal(tr2, Angle(), tr1, matr:GetAngles())
-									matr:Translate(posoffsetscaled / mdlscl)
-								else
-									//If the advbonemerge addon is uninstalled, then emulate the default garrymanip behavior, where parent's scale doesn't affect offset
-									//(this code should only be running if we're remapping)
-									matr:Translate(boneoffsets[i]["posoffset"])
-								end
-							end
-
-							//Apply pos manip and ang offset/manip
-							matr:Translate(self:GetManipulateBonePosition(i))
-							matr:Rotate(boneoffsets[i]["angoffset"])
-							matr:Rotate(self:GetManipulateBoneAngles(i))
-						end
-					end
-
-				end
-
-
-				if matr then  //matr can be nil if we're visible but our parent isn't
-
-					//Store a non-scaled version of our angles if we're scaling
-					local scale = self:GetManipulateBoneScale(i)
-					if !self.AdvBone_Angs[i] and scale != Vector(1,1,1) then
-						self.AdvBone_Angs[i] = matr:GetAngles()
-					end
-					//Apply scale manip (if advbonemerge is uninstalled, then garrymanips already handle this, so skip it)
-					if !self.AdvBone_Uninstalled then
-						matr:Scale(scale)
-					end
-
-					if !self.AdvBone_BoneHitBoxes then //used by bloat
-						local ourscale = matr:GetScale()
-						highestbonescale = math.max(ourscale.x,ourscale.y,ourscale.z,highestbonescale)
-					end
-
-					if i == -1 then
-						self.AdvBone_OriginMatrix = matr
-
+					//Get the min and max positions of our bones ("bone bounds") for our render bounds calculation to use
+					local bonepos = nil
+					local hitboxmin, hitboxmax = nil, nil
+					if !self.SavedLocalBonePositions[i] or !self.SavedBoneMatrices[i] or matr:GetTranslation() != self.SavedBoneMatrices[i]:GetTranslation() or matr:GetAngles() != self.SavedBoneMatrices[i]:GetAngles() then
 						if parent then
-							//Move our actual model origin with the origin control
-							self:SetPos(matr:GetTranslation())
-							self:SetAngles(self.AdvBone_Angs[-1] or matr:GetAngles())
-							//Also move our render origin - setpos alone is unreliable since the position can get reasserted if the parent moves or something like that
-							self:SetRenderOrigin(matr:GetTranslation())
-							self:SetRenderAngles(self.AdvBone_Angs[-1] or matr:GetAngles())
+							bonepos = WorldToLocal(matr:GetTranslation(), Angle(), parent:GetPos(), parent:GetAngles())
+						else
+							bonepos = WorldToLocal(matr:GetTranslation(), Angle(), self:GetPos(), self:GetAngles())
 						end
+						if self.AdvBone_BoneHitBoxes[i] then
+							//local pos = matr:GetTranslation()
+							local scl = matr:GetScale()
+							local pmins = self.AdvBone_BoneHitBoxes[i].min * scl
+							local pmaxs = self.AdvBone_BoneHitBoxes[i].max * scl
+							local vects = {
+								pmins, Vector(pmaxs.x, pmins.y, pmins.z),
+								Vector(pmins.x, pmaxs.y, pmins.z), Vector(pmaxs.x, pmaxs.y, pmins.z),
+								Vector(pmins.x, pmins.y, pmaxs.z), Vector(pmaxs.x, pmins.y, pmaxs.z),
+								Vector(pmins.x, pmaxs.y, pmaxs.z), pmaxs,
+							}
+							for i = 1, #vects do
+								local wspos = LocalToWorld(vects[i], Angle(), matr:GetTranslation(), matr:GetAngles())
+								if parent then
+									wspos = WorldToLocal(wspos, Angle(), parent:GetPos(), parent:GetAngles()) //renderbounds are relative to the parent, because renderorigin/renderangles don't affect them
+								else
+									wspos = WorldToLocal(wspos, Angle(), self:GetPos(), self:GetAngles())
+								end
+								vects[i] = wspos
+							end
+							hitboxmin = Vector( math.min(vects[1].x, vects[2].x, vects[3].x, vects[4].x, 
+									vects[5].x, vects[6].x, vects[7].x, vects[8].x),
+									math.min(vects[1].y, vects[2].y, vects[3].y, vects[4].y, 
+									vects[5].y, vects[6].y, vects[7].y, vects[8].y),
+									math.min(vects[1].z, vects[2].z, vects[3].z, vects[4].z, 
+									vects[5].z, vects[6].z, vects[7].z, vects[8].z) )
+							hitboxmax = Vector( math.max(vects[1].x, vects[2].x, vects[3].x, vects[4].x, 
+									vects[5].x, vects[6].x, vects[7].x, vects[8].x),
+									math.max(vects[1].y, vects[2].y, vects[3].y, vects[4].y, 
+									vects[5].y, vects[6].y, vects[7].y, vects[8].y),
+									math.max(vects[1].z, vects[2].z, vects[3].z, vects[4].z, 
+									vects[5].z, vects[6].z, vects[7].z, vects[8].z) )
+							self.SavedLocalHitBoxes[i] = {min = hitboxmin, max = hitboxmax}
+						end
+						self.SavedLocalBonePositions[i] = bonepos
+					else
+						//If the bone hasn't moved at all then just use the old position instead of calling WorldToLocal again
+						bonepos = self.SavedLocalBonePositions[i]
+						if self.SavedLocalHitBoxes[i] then
+							hitboxmin = self.SavedLocalHitBoxes[i].min
+							hitboxmax = self.SavedLocalHitBoxes[i].max
+						end
+					end
 
-						//If we're an effect, then keep our origin in the render bounds so that the effect ring doesn't disappear on models 
-						//where the origin is really far away from the bones
-						if self:GetPhysicsMode() == 2 then
-							local localoriginpos = self.AdvBone_OriginMatrix:GetTranslation() - self:GetPos()
+					local function SetBoneMinsMaxs(vec)
+						if !bonemins and !bonemaxs then
 							bonemins = Vector()
 							bonemaxs = Vector()
-							bonemins:Set(localoriginpos)
-							bonemaxs:Set(localoriginpos)
+							bonemins:Set(vec)
+							bonemaxs:Set(vec)
+						else
+							bonemins.x = math.min(vec.x,bonemins.x)
+							bonemins.y = math.min(vec.y,bonemins.y)
+							bonemins.z = math.min(vec.z,bonemins.z)
+							bonemaxs.x = math.max(vec.x,bonemaxs.x)
+							bonemaxs.y = math.max(vec.y,bonemaxs.y)
+							bonemaxs.z = math.max(vec.z,bonemaxs.z)
 						end
+					end
+					if hitboxmin and hitboxmax then
+						SetBoneMinsMaxs(hitboxmin)
+						SetBoneMinsMaxs(hitboxmax)
+						--[[if parent then
+							debugoverlay.BoxAngles(parent:GetPos(), hitboxmin, hitboxmax, parent:GetAngles(), 0.1, Color(255,255,0,0))
+						else
+							debugoverlay.BoxAngles(self:GetPos(), hitboxmin, hitboxmax, self:GetAngles(), 0.1, Color(255,255,0,0))
+						end]]
 					else
-						//Get the min and max positions of our bones ("bone bounds") for our render bounds calculation to use
-						local bonepos = nil
-						local hitboxmin, hitboxmax = nil, nil
-						if !self.SavedLocalBonePositions[i] or !self.SavedBoneMatrices[i] or matr:GetTranslation() != self.SavedBoneMatrices[i]:GetTranslation() or matr:GetAngles() != self.SavedBoneMatrices[i]:GetAngles() then
-							if parent then
-								bonepos = WorldToLocal(matr:GetTranslation(), Angle(), parent:GetPos(), parent:GetAngles())
-							else
-								bonepos = WorldToLocal(matr:GetTranslation(), Angle(), self:GetPos(), self:GetAngles())
-							end
-							if self.AdvBone_BoneHitBoxes[i] then
-								//local pos = matr:GetTranslation()
-								local scl = matr:GetScale()
-								local pmins = self.AdvBone_BoneHitBoxes[i].min * scl
-								local pmaxs = self.AdvBone_BoneHitBoxes[i].max * scl
-								local vects = {
-									pmins, Vector(pmaxs.x, pmins.y, pmins.z),
-									Vector(pmins.x, pmaxs.y, pmins.z), Vector(pmaxs.x, pmaxs.y, pmins.z),
-									Vector(pmins.x, pmins.y, pmaxs.z), Vector(pmaxs.x, pmins.y, pmaxs.z),
-									Vector(pmins.x, pmaxs.y, pmaxs.z), pmaxs,
-								}
-								for i = 1, #vects do
-									local wspos = LocalToWorld(vects[i], Angle(), matr:GetTranslation(), matr:GetAngles())
-									if parent then
-										wspos = WorldToLocal(wspos, Angle(), parent:GetPos(), parent:GetAngles()) //renderbounds are relative to the parent, because renderorigin/renderangles don't affect them
-									else
-										wspos = WorldToLocal(wspos, Angle(), self:GetPos(), self:GetAngles())
-									end
-									vects[i] = wspos
+						SetBoneMinsMaxs(bonepos)
+					end
+					
+					//Apply the bone matrix
+					if self:GetBoneName(i) != "__INVALIDBONE__" then
+						self:SetBoneMatrix(i,matr)
+
+						if !BonesHaveChanged and matr != self.SavedBoneMatrices[i] then
+							//Jigglebones always return a slightly different value, but we don't want to freeze them in place or have them hold the whole thing up.
+							//Instead, compare rounded values using code recycled from earlier in the function.
+							if !targetboneid and self:BoneHasFlag(i,BONE_ALWAYS_PROCEDURAL) then
+								//local tab1 = matr:ToTable() //don't use matr:ToTable here either for consistency, though this barely makes a difference since procedural bones aren't that common
+								//local tab2 = self.SavedBoneMatrices[i]:ToTable()
+								local function FastMatrTab(m)
+									local t = m:GetTranslation()
+									local a = m:GetAngles()
+									local tab = {
+										[1] = math.Round(t.x),
+										[2] = math.Round(t.y),
+										[3] = math.Round(t.z),
+										[4] = math.Round(a.x),
+										[5] = math.Round(a.y),
+										[6] = math.Round(a.z),
+									}
+									return tab
 								end
-								hitboxmin = Vector( math.min(vects[1].x, vects[2].x, vects[3].x, vects[4].x, 
-										vects[5].x, vects[6].x, vects[7].x, vects[8].x),
-										math.min(vects[1].y, vects[2].y, vects[3].y, vects[4].y, 
-										vects[5].y, vects[6].y, vects[7].y, vects[8].y),
-										math.min(vects[1].z, vects[2].z, vects[3].z, vects[4].z, 
-										vects[5].z, vects[6].z, vects[7].z, vects[8].z) )
-								hitboxmax = Vector( math.max(vects[1].x, vects[2].x, vects[3].x, vects[4].x, 
-										vects[5].x, vects[6].x, vects[7].x, vects[8].x),
-										math.max(vects[1].y, vects[2].y, vects[3].y, vects[4].y, 
-										vects[5].y, vects[6].y, vects[7].y, vects[8].y),
-										math.max(vects[1].z, vects[2].z, vects[3].z, vects[4].z, 
-										vects[5].z, vects[6].z, vects[7].z, vects[8].z) )
-								self.SavedLocalHitBoxes[i] = {min = hitboxmin, max = hitboxmax}
-							end
-							self.SavedLocalBonePositions[i] = bonepos
-						else
-							//If the bone hasn't moved at all then just use the old position instead of calling WorldToLocal again
-							bonepos = self.SavedLocalBonePositions[i]
-							if self.SavedLocalHitBoxes[i] then
-								hitboxmin = self.SavedLocalHitBoxes[i].min
-								hitboxmax = self.SavedLocalHitBoxes[i].max
-							end
-						end
-
-						local function SetBoneMinsMaxs(vec)
-							if !bonemins and !bonemaxs then
-								bonemins = Vector()
-								bonemaxs = Vector()
-								bonemins:Set(vec)
-								bonemaxs:Set(vec)
-							else
-								bonemins.x = math.min(vec.x,bonemins.x)
-								bonemins.y = math.min(vec.y,bonemins.y)
-								bonemins.z = math.min(vec.z,bonemins.z)
-								bonemaxs.x = math.max(vec.x,bonemaxs.x)
-								bonemaxs.y = math.max(vec.y,bonemaxs.y)
-								bonemaxs.z = math.max(vec.z,bonemaxs.z)
-							end
-						end
-						if hitboxmin and hitboxmax then
-							SetBoneMinsMaxs(hitboxmin)
-							SetBoneMinsMaxs(hitboxmax)
-							--[[if parent then
-								debugoverlay.BoxAngles(parent:GetPos(), hitboxmin, hitboxmax, parent:GetAngles(), 0.1, Color(255,255,0,0))
-							else
-								debugoverlay.BoxAngles(self:GetPos(), hitboxmin, hitboxmax, self:GetAngles(), 0.1, Color(255,255,0,0))
-							end]]
-						else
-							SetBoneMinsMaxs(bonepos)
-						end
-						
-						//Apply the bone matrix
-						if self:GetBoneName(i) != "__INVALIDBONE__" then
-							self:SetBoneMatrix(i,matr)
-
-							if !BonesHaveChanged and matr != self.SavedBoneMatrices[i] then
-								//Jigglebones always return a slightly different value, but we don't want to freeze them in place or have them hold the whole thing up.
-								//Instead, compare rounded values using code recycled from earlier in the function.
-								if !targetboneid and self:BoneHasFlag(i,BONE_ALWAYS_PROCEDURAL) then
-									//local tab1 = matr:ToTable() //don't use matr:ToTable here either for consistency, though this barely makes a difference since procedural bones aren't that common
-									//local tab2 = self.SavedBoneMatrices[i]:ToTable()
-									local function FastMatrTab(m)
-										local t = m:GetTranslation()
-										local a = m:GetAngles()
-										local tab = {
-											[1] = math.Round(t.x),
-											[2] = math.Round(t.y),
-											[3] = math.Round(t.z),
-											[4] = math.Round(a.x),
-											[5] = math.Round(a.y),
-											[6] = math.Round(a.z),
-										}
-										return tab
-									end
-									local tab1 = FastMatrTab(matr)
-									local tab2 = FastMatrTab(self.SavedBoneMatrices[i])
-									for k, v in pairs (tab1) do
-										if !BonesHaveChanged then
-											if v != tab2[k] then
-												BonesHaveChanged = true
-												break
-											end
-										else
+								local tab1 = FastMatrTab(matr)
+								local tab2 = FastMatrTab(self.SavedBoneMatrices[i])
+								for k, v in pairs (tab1) do
+									if !BonesHaveChanged then
+										if v != tab2[k] then
+											BonesHaveChanged = true
 											break
 										end
+									else
+										break
 									end
-								else
-									//MsgN(matr)
-									//MsgN("!=")
-									//MsgN(self.SavedBoneMatrices[i])
-									//MsgN("")
-									BonesHaveChanged = true
 								end
+							else
+								//MsgN(matr)
+								//MsgN("!=")
+								//MsgN(self.SavedBoneMatrices[i])
+								//MsgN("")
+								BonesHaveChanged = true
 							end
-
-							self.SavedBoneMatrices[i] = matr
 						end
-						
-					end
 
+						self.SavedBoneMatrices[i] = matr
+					end
+					
 				end
 
 			end
 
-			self.AdvBone_RenderBounds_HighestBoneScale = highestbonescale
-			self.AdvBone_RenderBounds_BoneMins = bonemins
-			self.AdvBone_RenderBounds_BoneMaxs = bonemaxs
-			--[[if parent then
-				debugoverlay.BoxAngles(parent:GetPos(), bonemins, bonemaxs, parent:GetAngles(), 0.1, Color(0,255,0,0))
-			else
-				debugoverlay.BoxAngles(self:GetPos(), bonemins, bonemaxs, self:GetAngles(), 0.1, Color(0,255,0,0))
-			end]]
+		end
 
-			if BonesHaveChanged then
-				self.LastBoneChangeTime = curtime
-			end
-		end)
+		self.AdvBone_RenderBounds_HighestBoneScale = highestbonescale
+		self.AdvBone_RenderBounds_BoneMins = bonemins
+		self.AdvBone_RenderBounds_BoneMaxs = bonemaxs
+		--[[if parent then
+			debugoverlay.BoxAngles(parent:GetPos(), bonemins, bonemaxs, parent:GetAngles(), 0.1, Color(0,255,0,0))
+		else
+			debugoverlay.BoxAngles(self:GetPos(), bonemins, bonemaxs, self:GetAngles(), 0.1, Color(0,255,0,0))
+		end]]
 
+		if BonesHaveChanged then
+			self.LastBoneChangeTime = curtime
+		end
 	end
 
 	function ENT:CalcAbsolutePosition(pos, ang)
