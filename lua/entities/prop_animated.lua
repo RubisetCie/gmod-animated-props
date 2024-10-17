@@ -1404,8 +1404,166 @@ if SERVER then
 
 	end
 
+end
 
 
+
+
+//Networking for edit menu inputs
+local EditMenuInputs = {
+	[0] = "channel_sequence",
+	"channel_pause",
+	"channel_frame",
+	"channel_speed",
+	"channel_loop_mode",
+	"channel_loop_delay",
+	"channel_numpad_num",
+	"channel_numpad_toggle",
+	"channel_numpad_starton",
+	"channel_numpad_mode",
+	"channel_startendpoint",
+	"channel_layersetting",
+	"poseparam_set",
+	"poseparam_drive",
+	"phys_scale",
+	"phys_mode",
+	"phys_beloworigin",
+	"remap_getwithtool",
+	"remap_model",
+	"remap_alpha",
+	"remap_pos",
+	"misc_animeventfx",
+	"misc_ragdollizeondmg"
+}
+local EditMenuInputs_bits = 5 //max 31
+EditMenuInputs = table.Flip(EditMenuInputs)
+//How this works:
+//- table.Flip sets the table to {["channel_sequence"] = 0}, and so on
+//- net.Write retrieves the corresponding number of a string with EditMenuInputs[input], then sends that number
+//- net.Read gets the number, then retrieves its corresponding string with table.KeyFromValue(EditMenuInputs, input)
+//This lets us add as many networkable strings to this table as we want, without having to manually assign each one a number.
+
+
+if CLIENT then
+
+	function ENT:DoInput(input, ...)
+
+		net.Start("AnimProp_EditMenuInput_SendToSv")
+	
+			net.WriteEntity(self)
+			local args = {...}
+	
+			net.WriteUInt(EditMenuInputs[input], EditMenuInputs_bits)
+
+			if string.StartsWith(input, "channel_") then
+				net.WriteUInt(args[1], 3) //animation channel, 1-4
+			end
+	
+			//Animation menu inputs
+			if input == "channel_sequence" then
+	
+				net.WriteInt(args[2], 16) //sequence id (no idea what the max number of sequences is so we'll say it's 32767 to be extra safe (gmod playermodel with all wOS addons installed has 4428))
+	
+			elseif input == "channel_pause" then
+	
+				net.WriteBool(args[2]) //enable/disable pause
+	
+			elseif input == "channel_frame" then
+	
+				net.WriteFloat(args[2]) //cycle
+	
+			elseif input == "channel_speed" then
+	
+				net.WriteFloat(args[2]) //playback rate
+	
+			elseif input == "channel_loop_mode" then
+	
+				net.WriteUInt(args[2], 2) //loop mode id
+	
+			elseif input == "channel_loop_delay" then
+	
+				net.WriteFloat(args[2]) //loop delay
+	
+			elseif input == "channel_numpad_num" then
+	
+				net.WriteInt(args[2], 11) //numpad key id (again, no idea what the max number of keys is so we'll say it's 1024 just to be safe)
+	
+			elseif input == "channel_numpad_toggle" then
+	
+				net.WriteBool(args[2]) //enable/disable numpad toggle
+	
+			elseif input == "channel_numpad_starton" then
+	
+				net.WriteBool(args[2]) //enable/disable numpad start on
+	
+			elseif input == "channel_numpad_mode" then
+	
+				net.WriteUInt(args[2], 2) //numpad mode id
+	
+			elseif input == "channel_startendpoint" then
+	
+				net.WriteBool(args[2]) //false = start point, true = end point
+				net.WriteFloat(args[3]) //new point
+
+			elseif input == "channel_layersetting" then
+	
+				net.WriteUInt(args[2], 2) //which value in the vector to change: 0 = x/layerblendin, 1 = y/layerblendout, 2 = z/layerweight
+				net.WriteFloat(args[3]) //setting value
+	
+			//Pose Parameter inputs
+			elseif input == "poseparam_set" then
+	
+				net.WriteInt(args[1], 11) //pose parameter id (again, no idea what the max number of keys is so we'll say it's 1024 just to be safe)
+				net.WriteFloat(args[2]) //pose value
+	
+			elseif input == "poseparam_drive" then
+	
+				net.WriteBool(args[1]) //enable/disable control movement pose params
+	
+			//Physics inputs
+			elseif input == "phys_scale" then
+	
+				net.WriteFloat(args[1]) //model scale
+	
+			elseif input == "phys_mode" then
+	
+				net.WriteUInt(args[1], 2) //physics mode id
+	
+			elseif input == "phys_beloworigin" then
+	
+				net.WriteBool(args[1]) //enable/disable physics below model origin
+	
+			//Remapping inputs
+			//elseif input == "remap_getwithtool" then
+	
+			elseif input == "remap_model" then
+	
+				net.WriteString(args[1]) //puppeteer model path
+	
+			elseif input == "remap_alpha" then
+	
+				net.WriteBool(args[1]) //0/1 puppeteer alpha value
+	
+			elseif input == "remap_pos" then
+	
+				net.WriteVector(args[1])
+	
+			//Misc inputs
+			elseif input == "misc_animeventfx" then
+	
+				net.WriteBool(args[1]) //enable/disable animevent effects
+	
+			elseif input == "misc_ragdollizeondmg" then
+				
+				net.WriteBool(args[1]) //enable/disable ragdollize on damage
+	
+			end
+	
+		net.SendToServer()
+	
+	end
+	
+else
 
 	util.AddNetworkString("AnimProp_EditMenuInput_SendToSv")
 
@@ -1415,20 +1573,22 @@ if SERVER then
 		local self = net.ReadEntity()
 		if !IsValid(self) or self:GetClass() != "prop_animated" then return end
 
-		local input = net.ReadUInt(5)
+		local input = net.ReadUInt(EditMenuInputs_bits)
 		if !input then return end
+		input = table.KeyFromValue(EditMenuInputs, input)
 
-		if input == 0 then //Set sequence
+		local i = nil
+		if string.StartsWith(input, "channel_") then
+			i = net.ReadUInt(3) //animation channel, 1-4
+		end
 
-			local i = net.ReadUInt(4) //animation channel
+		if input == "channel_sequence" then
 
 			self["SetChannel" .. i .. "Sequence"](self, net.ReadInt(16))
 			self["SetChannel" .. i .. "PauseFrame"](self, 0)
 			self:StartAnimation(i)
 
-		elseif input == 1 then //Set pause
-
-			local i = net.ReadUInt(4) //animation channel
+		elseif input == "channel_pause" then
 
 			local pause = net.ReadBool()
 			self["SetChannel" .. i .. "Pause"](self, pause)
@@ -1455,20 +1615,15 @@ if SERVER then
 
 			end
 
-		elseif input == 2 then //Set frame
-
-			local i = net.ReadUInt(4) //animation channel
+		elseif input == "channel_frame" then
 
 			local frame = net.ReadFloat()
 			self["SetChannel" .. i .. "PauseFrame"](self, frame)
 			self:StartAnimation(i, frame)
 
-		elseif input == 3 then //Set speed
+		elseif input == "channel_speed" then
 
-			local i = net.ReadUInt(4) //animation channel
-
-			local speed = net.ReadFloat()
-			self["SetChannel" .. i .. "Speed"](self, speed)
+			self["SetChannel" .. i .. "Speed"](self, net.ReadFloat())
 			if !self["GetChannel" .. i .. "Pause"](self) then
 
 				local frame = 0
@@ -1485,23 +1640,17 @@ if SERVER then
 
 			end
 
-		elseif input == 4 then //Set loop mode
-
-			local i = net.ReadUInt(4) //animation channel
+		elseif input == "channel_loop_mode" then
 
 			self["SetChannel" .. i .. "LoopMode"](self, net.ReadUInt(2))
 			self:StartAnimation(i)
 
-		elseif input == 5 then //Set loop delay
-
-			local i = net.ReadUInt(4) //animation channel
+		elseif input == "channel_loop_delay" then
 
 			self["SetChannel" .. i .. "LoopDelay"](self, net.ReadFloat())
 			self:StartAnimation(i)
 
-		elseif input == 6 then //Set numpad
-
-			local i = net.ReadUInt(4) //animation channel
+		elseif input == "channel_numpad_num" then
 
 			local ply = self:GetPlayer() //NOTE: this still works if ply doesn't exist
 
@@ -1519,9 +1668,7 @@ if SERVER then
 				AnimpropNumpadFunction(ply, self, i, false)
 			end
 
-		elseif input == 7 then //Set numpad toggle
-
-			local i = net.ReadUInt(4) //animation channel
+		elseif input == "channel_numpad_toggle" then
 
 			local ply = self:GetPlayer() //NOTE: this still works if ply doesn't exist
 
@@ -1537,16 +1684,12 @@ if SERVER then
 				end
 			end
 
-		elseif input == 8 then //Set numpad start on
-
-			local i = net.ReadUInt(4) //animation channel
+		elseif input == "channel_numpad_starton" then
 
 			self["SetChannel" .. i .. "NumpadStartOn"](self, net.ReadBool())
 			self:StartAnimation(i)
 
-		elseif input == 9 then //Set numpad mode
-
-			local i = net.ReadUInt(4) //animation channel
+		elseif input == "channel_numpad_mode" then
 
 			local mode = net.ReadUInt(2)
 			self["SetChannel" .. i .. "NumpadMode"](self, mode)
@@ -1564,9 +1707,7 @@ if SERVER then
 				self:StartAnimation(i)
 			end
 
-		elseif input == 10 then //Set start or end point
-
-			local i = net.ReadUInt(4) //animation channel
+		elseif input == "channel_startendpoint" then
 
 			local isend = net.ReadBool() //false = start point, true = end point
 			local newpoint = net.ReadFloat()
@@ -1597,63 +1738,7 @@ if SERVER then
 				end
 			end
 
-		elseif input == 11 then //Set pose parameter
-
-			local i = net.ReadInt(11)
-
-			local name = self:GetPoseParameterName(i)
-			local value = net.ReadFloat()
-			self:SetPoseParameter(name, value)
-			self.PoseParams[i] = value
-
-			//Advanced Bonemerge: We're updating the animation, make sure BuildBonePositions starts running again
-			AdvBone_ResetBoneChangeTime(self)
-			//Puppeteers can run this too, so make sure they wake up their parent as well
-			if self.IsPuppeteer and IsValid(self:GetParent()) then
-				AdvBone_ResetBoneChangeTime(self:GetParent())
-			end
-
-		elseif input == 12 then //Set control movement pose parameters
-
-			self:SetControlMovementPoseParams(net.ReadBool())
-
-		elseif input == 13 then //Set model scale
-
-			local scale = net.ReadFloat()
-			if scale == 1 then scale = 1.0000001 end
-			if self:GetModelScale() != scale then
-				//Just update the scale and let the think function take care of the rest (we want other scaling methods like Biggify/Smallify to work too)
-				self:SetModelScale(scale)
-			end
-
-		elseif input == 14 then //Set physics mode
-
-			local newvalue = net.ReadUInt(2)
-
-			//Only allow mode 0 (physics prop) for prop models
-			local mdl = self:GetModel()
-			if newvalue == 0 and !( util.IsValidProp(mdl) and !util.IsValidRagdoll(mdl) ) then
-				newvalue = 1
-			end
-
-			if self:GetPhysicsMode() != newvalue then
-				self:SetPhysicsMode(newvalue)
-				//self:UpdateAnimpropPhysics()
-				self.ThinkUpdateAnimpropPhysics = true
-			end
-
-		elseif input == 15 then //Set no physics below origin
-
-			local newvalue = net.ReadBool()
-			if self:GetNoPhysicsBelowOrigin() != newvalue then
-				self:SetNoPhysicsBelowOrigin(newvalue)
-				//self:UpdateAnimpropPhysics()
-				self.ThinkUpdateAnimpropPhysics = true
-			end
-
-		elseif input == 16 then //Set layer setting (layerblendin, layerblendout, or layerweight)
-
-			local i = net.ReadUInt(4) //animation channel
+		elseif input == "channel_layersetting" then
 
 			local vec = self["GetChannel" .. i .. "LayerSettings"](self)
 			local which = net.ReadUInt(2)
@@ -1669,7 +1754,61 @@ if SERVER then
 			self["SetChannel" .. i .. "LayerSettings"](self, vec)
 			self:StartAnimation(i)
 
-		elseif input == 17 then //Get puppeteer with tool
+		elseif input == "poseparam_set" then
+
+			local i = net.ReadInt(11)
+
+			local name = self:GetPoseParameterName(i)
+			local value = net.ReadFloat()
+			self:SetPoseParameter(name, value)
+			self.PoseParams[i] = value
+
+			//Advanced Bonemerge: We're updating the animation, make sure BuildBonePositions starts running again
+			AdvBone_ResetBoneChangeTime(self)
+			//Puppeteers can run this too, so make sure they wake up their parent as well
+			if self.IsPuppeteer and IsValid(self:GetParent()) then
+				AdvBone_ResetBoneChangeTime(self:GetParent())
+			end
+
+		elseif input == "poseparam_drive" then
+
+			self:SetControlMovementPoseParams(net.ReadBool())
+
+		elseif input == "phys_scale" then
+
+			local scale = net.ReadFloat()
+			if scale == 1 then scale = 1.0000001 end
+			if self:GetModelScale() != scale then
+				//Just update the scale and let the think function take care of the rest (we want other scaling methods like Biggify/Smallify to work too)
+				self:SetModelScale(scale)
+			end
+
+		elseif input == "phys_mode" then
+
+			local newvalue = net.ReadUInt(2)
+
+			//Only allow mode 0 (physics prop) for prop models
+			local mdl = self:GetModel()
+			if newvalue == 0 and !( util.IsValidProp(mdl) and !util.IsValidRagdoll(mdl) ) then
+				newvalue = 1
+			end
+
+			if self:GetPhysicsMode() != newvalue then
+				self:SetPhysicsMode(newvalue)
+				//self:UpdateAnimpropPhysics()
+				self.ThinkUpdateAnimpropPhysics = true
+			end
+
+		elseif input == "phys_beloworigin" then
+
+			local newvalue = net.ReadBool()
+			if self:GetNoPhysicsBelowOrigin() != newvalue then
+				self:SetNoPhysicsBelowOrigin(newvalue)
+				//self:UpdateAnimpropPhysics()
+				self.ThinkUpdateAnimpropPhysics = true
+			end
+
+		elseif input == "remap_getwithtool" then
 
 			if !IsValid(ply) then return end
 			if !GetConVar("toolmode_allow_animprops"):GetBool() then return end //TODO: this was copied from advbonemerge, which also does a CanTool check with a fake trace. is that necessary here?
@@ -1686,23 +1825,23 @@ if SERVER then
 				tool:GetWeapon():SetNWEntity("Animprops_CurEntity", self)
 			end)
 
-		elseif input == 18 then //Set puppeteer model
+		elseif input == "remap_model" then
 
 			self:SetPuppeteerModel(net.ReadString()) //don't worry about checking if the model name is any good, we'll do that in the function
 
-		elseif input == 19 then //Set puppeteer alpha
+		elseif input == "remap_alpha" then
 
 			self:SetPuppeteerAlpha(net.ReadBool())
 
-		elseif input == 20 then //Set puppeteer pos
+		elseif input == "remap_pos" then
 
 			self:SetPuppeteerPos(net.ReadVector())
 
-		elseif input == 21 then //Set animevent effects
+		elseif input == "misc_animeventfx" then
 
 			self:SetEnableAnimEventEffects(net.ReadBool())
 
-		elseif input == 22 then //Set ragdollize on damage
+		elseif input == "misc_ragdollizeondmg" then
 
 			self:SetRagdollizeOnDamage(net.ReadBool())
 

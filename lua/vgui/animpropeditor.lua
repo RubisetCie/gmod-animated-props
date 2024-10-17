@@ -195,7 +195,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 		entry.OnEnter = function()
 			local sequence = animent:LookupSequence(entry:GetText())
-			self:SendInput(animent, "setsequence", i, sequence)
+			animent:DoInput("channel_sequence", i, sequence)
 			//Update tab icon
 			if sequence >= 0 then
 				sheet.Tab.Image:SetImage("icon16/lightbulb.png")
@@ -275,7 +275,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 			slider:SetValue(animent["GetChannel" .. i .. "Speed"](animent) or 1.00)
 			function slider.OnValueChanged(_, val)
-				self:SendInput(animent, "setspeed", i, val)
+				animent:DoInput("channel_speed", i, val)
 			end
 
 			local help = vgui.Create("DLabel", rpnl)
@@ -340,7 +340,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			drop.Combo:AddChoice(numpadmode1, 1)
 			drop.Combo:AddChoice(numpadmode2, 2)
 			function drop.Combo.OnSelect(_, index, value, data)
-				self:SendInput(animent, "setnumpadmode", i, data)
+				animent:DoInput("channel_numpad_mode", i, data)
 
 				//"toggle" option is grayed out for numpad mode 2 (restart animation); make sure it's always true to prevent unintended behavior 
 				//("restart animation" with toggle off makes the anim restart on both key in and key out, instead of just key in)
@@ -394,7 +394,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			numpadpnl.numpad:SetSelectedNumber(animent["GetChannel" .. i .. "Numpad"](animent) or 0)
 			function numpadpnl.numpad.SetValue(_, val)
 				numpadpnl.numpad:SetSelectedNumber(val)
-				self:SendInput(animent, "setnumpad", i, val)
+				animent:DoInput("channel_numpad_num", i, val)
 			end
 
 			pnl:Dock(TOP)
@@ -416,7 +416,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 			check:SetValue(animent["GetChannel" .. i .. "NumpadToggle"](animent))
 			check.OnChange = function(_, val)
-				self:SendInput(animent, "setnumpadtoggle", i, val)
+				animent:DoInput("channel_numpad_toggle", i, val)
 			end
 			check.Think = function()
 				if !IsValid(animent) then return end
@@ -440,7 +440,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 			check:SetValue(animent["GetChannel" .. i .. "NumpadStartOn"](animent))
 			check.OnChange = function(_, val)
-				self:SendInput(animent, "setnumpadstarton", i, val)
+				animent:DoInput("channel_numpad_starton", i, val)
 			end
 			check.Think = function()
 				if !IsValid(animent) then return end
@@ -575,7 +575,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			drop.Combo:AddChoice(loopmode1, 1)
 			drop.Combo:AddChoice(loopmode2, 2)
 			function drop.Combo.OnSelect(_, index, value, data)
-				self:SendInput(animent, "setloopmode", i, data)
+				animent:DoInput("channel_loop_mode", i, data)
 			end
 		
 			drop:SetHeight(25)
@@ -613,7 +613,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 			slider:SetValue(animent["GetChannel" .. i .. "LoopDelay"](animent) or 0.00)
 			function slider.OnValueChanged(_, val)
-				self:SendInput(animent, "setloopdelay", i, val)
+				animent:DoInput("channel_loop_delay", i, val)
 			end
 
 
@@ -685,7 +685,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 						track.CustomStartPoint = val
 					end
 				end
-				self:SendInput(animent, "setstartorendpoint", i, false, val)
+				animent:DoInput("channel_startendpoint", i, false, val)
 			end
 			back.StartPointSlider = slider
 
@@ -735,7 +735,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 						track.CustomEndPoint = val
 					end
 				end
-				self:SendInput(animent, "setstartorendpoint", i, true, val)
+				animent:DoInput("channel_startendpoint", i, true, val)
 			end
 			back.EndPointSlider = slider
 
@@ -810,7 +810,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 				slider:SetValue(layersettings.z)
 				function slider.OnValueChanged(_, val)
-					self:SendInput(animent, "setlayersetting", i, 2, val)
+					animent:DoInput("channel_layersetting", i, 2, val)
 				end
 
 				local help = vgui.Create("DLabel", rpnl)
@@ -872,7 +872,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 							track.BlendInPoint = val
 						end
 					end
-					self:SendInput(animent, "setlayersetting", i, 0, val)
+					animent:DoInput("channel_layersetting", i, 0, val)
 				end
 				back.BlendInSlider = slider
 
@@ -923,7 +923,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 							track.BlendOutPoint = val
 						end
 					end
-					self:SendInput(animent, "setlayersetting", i, 1, 1 - val)
+					animent:DoInput("channel_layersetting", i, 1, 1 - val)
 				end
 				back.BlendOutSlider = slider
 
@@ -1019,7 +1019,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 			if track:GetDragging() and !pnldisabled.NumpadIsDisabling then
 				track:SetSlideX( math.Clamp(track:GetSlideX(), track.CustomStartPoint or 0, track.CustomEndPoint or 1) ) //don't let the player drag it into grayed-out areas
-				self:SendInput(animent, "setframe", i, track:GetSlideX() or 0)
+				animent:DoInput("channel_frame", i, track:GetSlideX() or 0)
 				//pause:SetToggle(true)
 			else
 				local seq = animent["GetChannel" .. i .. "Sequence"](animent)
@@ -1050,7 +1050,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			pause:SetToggle(animent["GetChannel" .. i .. "Pause"](animent) or false)
 		end
 		function pause.OnToggled(val)
-			self:SendInput(animent, "setpause", i, pause:GetToggle() or false)
+			animent:DoInput("channel_pause", i, pause:GetToggle() or false)
 		end
 
 		//Right clicking on the seek bar opens a dropdown menu that can be used to set a custom start or end point
@@ -1074,7 +1074,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			if !(track.CustomEndPoint and track.CustomEndPoint <= x) and x > 0 and x < 1 then
 				local option = menu:AddOption("Set start point at " .. tostring(math.Round(x * 100, 2)) .. "% (" .. tostring(math.Round(x * duration, 2)) .. " secs)", function()
 					track.CustomStartPoint = x
-					self:SendInput(animent, "setstartorendpoint", i, false, x)
+					animent:DoInput("channel_startendpoint", i, false, x)
 					self.AnimChannels[i].StartPointSlider:SetValue(x)
 					self.AnimChannels[i].EndPointsCategory:DoExpansion(true)
 				end)
@@ -1085,7 +1085,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			if !(track.CustomStartPoint and track.CustomStartPoint >= x) and x > 0 and x < 1 then
 				local option = menu:AddOption("Set end point at " .. tostring(math.Round(x * 100, 2)) .. "% (" .. tostring(math.Round(x * duration, 2)) .. " secs)", function()
 					track.CustomEndPoint = x
-					self:SendInput(animent, "setstartorendpoint", i, true, x)
+					animent:DoInput("channel_startendpoint", i, true, x)
 					self.AnimChannels[i].EndPointSlider:SetValue(x)
 					self.AnimChannels[i].EndPointsCategory:DoExpansion(true)
 				end)
@@ -1097,7 +1097,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 				if !(track.BlendOutPoint and track.BlendOutPoint <= x) and x > 0 and x < 1 then
 					local option = menu:AddOption("Set blend in at " .. tostring(math.Round(x * 100, 2)) .. "% (" .. tostring(math.Round(x * duration, 2)) .. " secs)", function()
 						track.BlendInPoint = x
-						self:SendInput(animent, "setlayersetting", i, 0, x)
+						animent:DoInput("channel_layersetting", i, 0, x)
 						self.AnimChannels[i].BlendInSlider:SetValue(x)
 						self.AnimChannels[i].LayerOptionsCategory:DoExpansion(true)
 					end)
@@ -1108,7 +1108,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 				if !(track.BlendInPoint and track.BlendInPoint >= x) and x > 0 and x < 1 then
 					local option = menu:AddOption("Set blend out at " .. tostring(math.Round(x * 100, 2)) .. "% (" .. tostring(math.Round(x * duration, 2)) .. " secs)", function()
 						track.BlendOutPoint = x
-						self:SendInput(animent, "setlayersetting", i, 1, 1 - x)
+						animent:DoInput("channel_layersetting", i, 1, 1 - x)
 						self.AnimChannels[i].BlendOutSlider:SetValue(x)
 						self.AnimChannels[i].LayerOptionsCategory:DoExpansion(true)
 					end)
@@ -1124,7 +1124,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			if track.CustomStartPoint then
 				local option = menu:AddOption("Remove start point at " .. tostring(math.Round(track.CustomStartPoint * 100, 2)) .. "% (" .. tostring(math.Round(track.CustomStartPoint * duration,2)) .. " secs)", function()
 					track.CustomStartPoint = nil
-					self:SendInput(animent, "setstartorendpoint", i, false, 0)
+					animent:DoInput("channel_startendpoint", i, false, 0)
 					self.AnimChannels[i].StartPointSlider:SetValue(0)
 				end)
 				option:SetImage("icon16/control_start.png")
@@ -1134,7 +1134,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			if track.CustomEndPoint then
 				local option = menu:AddOption("Remove end point at " .. tostring(math.Round(track.CustomEndPoint * 100, 2)) .. "% (" .. tostring(math.Round(track.CustomEndPoint * duration,2)) .. " secs)", function()
 					track.CustomEndPoint = nil
-					self:SendInput(animent, "setstartorendpoint", i, true, 1)
+					animent:DoInput("channel_startendpoint", i, true, 1)
 					self.AnimChannels[i].EndPointSlider:SetValue(1)
 				end)
 				option:SetImage("icon16/control_end.png")
@@ -1144,7 +1144,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			if track.BlendInPoint then
 				local option = menu:AddOption("Remove blend in at " .. tostring(math.Round(track.BlendInPoint * 100, 2)) .. "% (" .. tostring(math.Round(track.BlendInPoint * duration,2)) .. " secs)", function()
 					track.BlendInPoint = nil
-					self:SendInput(animent, "setlayersetting", i, 0, 0)
+					animent:DoInput("channel_layersetting", i, 0, 0)
 					self.AnimChannels[i].BlendInSlider:SetValue(0)
 				end)
 				option:SetImage("icon16/control_fastforward.png")
@@ -1154,7 +1154,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			if track.BlendOutPoint then
 				local option = menu:AddOption("Remove blend out at " .. tostring(math.Round(track.BlendOutPoint * 100, 2)) .. "% (" .. tostring(math.Round(track.BlendOutPoint * duration,2)) .. " secs)", function()
 					track.BlendOutPoint = nil
-					self:SendInput(animent, "setlayersetting", i, 1, 0)
+					animent:DoInput("channel_layersetting", i, 1, 0)
 					self.AnimChannels[i].BlendOutSlider:SetValue(1)
 				end)
 				option:SetImage("icon16/control_rewind.png")
@@ -1326,7 +1326,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 		slider:SetValue( math.Remap(animent:GetPoseParameter(name), 0, 1, min, max) )
 		function slider.OnValueChanged(_, val)
-			self:SendInput(animent, "setposeparam", i, val)
+			animent:DoInput("poseparam_set", i, val)
 		end
 
 		//if name == "move_x" or name == "move_scale" then
@@ -1379,7 +1379,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 		
 			check:SetValue(animent:GetControlMovementPoseParams())
 			check.OnChange = function(_, val)
-				self:SendInput(animent, "setcontrolmovementposeparams", val)
+				animent:DoInput("poseparam_drive", val)
 			end
 
 			local help = vgui.Create("DLabel", optionspnl)
@@ -1490,7 +1490,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 		entry.OnEnter = function()
 			//util.IsValidModel() returns false here for models that aren't precached yet (i.e. copy-pasting a model path from spawnmenu without spawning the model first) 
 			//so we can't check validity here. We used to blank out this textentry whenever the player entered an invalid model path, but that's not worth the trouble.
-			self:SendInput(ent, "setpuppeteermodel", entry:GetText())
+			ent:DoInput("remap_model", entry:GetText())
 		end
 		entry.OnFocusChanged = function(_, b) 
 			if !b then entry:OnEnter() end
@@ -1505,7 +1505,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 		button:DockMargin(padding,0,0,0)
 
 		button.DoClick = function()
-			self:SendInput(ent, "getpuppeteerwithtool")
+			ent:DoInput("remap_getwithtool")
 		end
 
 		function entrypnl.PerformLayout(_, w, h)
@@ -1890,7 +1890,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			back.slider_pos_y:SetValue(vec.y)
 			back.slider_pos_z:SetValue(vec.z)
 			local movesliderfunc = function()
-				self:SendInput(ent2, "setpuppeteerpos", Vector(back.slider_pos_x:GetValue(), back.slider_pos_y:GetValue(), back.slider_pos_z:GetValue()))
+				ent2:DoInput("remap_pos", Vector(back.slider_pos_x:GetValue(), back.slider_pos_y:GetValue(), back.slider_pos_z:GetValue()))
 			end
 			back.slider_pos_x.OnValueChanged = movesliderfunc
 			back.slider_pos_y.OnValueChanged = movesliderfunc
@@ -1908,7 +1908,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 			slider:SetValue(ent2:GetPuppeteerAlpha())
 			function slider.OnValueChanged(_, val)
-				self:SendInput(ent2, "setpuppeteeralpha", val)
+				ent2:DoInput("remap_alpha", val)
 			end]]
 
 			local check = vgui.Create( "DCheckBoxLabel", rpnl)
@@ -1920,7 +1920,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 	
 			check:SetValue(ent2:GetPuppeteerAlpha())
 			check.OnChange = function(_, val)
-				self:SendInput(ent2, "setpuppeteeralpha", val)
+				ent2:DoInput("remap_alpha", val)
 			end
 	
 			//not necessary? will players understand that these options are all visual and don't actually matter if there's a checkbox that hides the puppeteer entirely?
@@ -2051,7 +2051,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 		slider:SetValue(ent:GetModelScale())
 		function slider.OnValueChanged(_, val)
-			self:SendInput(ent, "setmodelscale", val)
+			ent:DoInput("phys_scale", val)
 		end
 
 		local help = vgui.Create("DLabel", pnl)
@@ -2116,7 +2116,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 		drop.Combo:AddChoice(physmode1, 1)
 		drop.Combo:AddChoice(physmode2, 2)
 		function drop.Combo.OnSelect(_, index, value, data)
-			self:SendInput(ent, "setphysicsmode", data)
+			ent:DoInput("phys_mode", data)
 		end
 		
 		drop:SetHeight(25)
@@ -2137,7 +2137,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 		check:SetValue(ent:GetNoPhysicsBelowOrigin())
 		check.OnChange = function(_, val)
-			self:SendInput(ent, "setnophysicsbeloworigin", val)
+			ent:DoInput("phys_beloworigin", val)
 		end
 
 		local help = vgui.Create("DLabel", pnl)
@@ -2265,7 +2265,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 	
 			check:SetValue(ent:GetRagdollizeOnDamage())
 			check.OnChange = function(_, val)
-				self:SendInput(ent, "setragdollizeondamage", val)
+				ent:DoInput("misc_ragdollizeondmg", val)
 			end
 
 			local help = vgui.Create("DLabel", pnl)
@@ -2313,7 +2313,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 		check:SetValue(animent:GetEnableAnimEventEffects())
 		check.OnChange = function(_, val)
-			self:SendInput(animent, "setenableanimeventeffects", val)
+			animent:DoInput("misc_animeventfx", val)
 		end
 
 	//dummy category to add extra padding to bottom of list if there's a scrollbar
@@ -2494,184 +2494,6 @@ end
 
 function PANEL:OnEntityLost()
 	-- For override
-end
-
-
-
-
-function PANEL:SendInput(ent, input, ...)
-
-	if !IsValid(ent) then return end
-
-	net.Start("AnimProp_EditMenuInput_SendToSv")
-
-		net.WriteEntity(ent)
-		local args = {...}
-
-		//MsgN(input)
-		//PrintTable(args)
-
-		//Animation menu inputs
-		if input == "setsequence" then
-
-			net.WriteUInt(0, 5) //input id = 0
-
-			net.WriteUInt(args[1], 4) //animation channel
-			net.WriteInt(args[2], 16) //sequence id (no idea what the max number of sequences is so we'll say it's 32767 to be extra safe (gmod playermodel with all wOS addons installed has 4428))
-
-		elseif input == "setpause" then
-
-			net.WriteUInt(1, 5) //input id = 1
-
-			net.WriteUInt(args[1], 4) //animation channel
-			net.WriteBool(args[2]) //enable/disable pause
-
-		elseif input == "setframe" then
-
-			net.WriteUInt(2, 5) //input id = 2
-
-			net.WriteUInt(args[1], 4) //animation channel
-			net.WriteFloat(args[2]) //cycle
-
-		elseif input == "setspeed" then
-
-			net.WriteUInt(3, 5) //input id = 3
-
-			net.WriteUInt(args[1], 4) //animation channel
-			net.WriteFloat(args[2]) //playback rate
-
-		elseif input == "setloopmode" then
-
-			net.WriteUInt(4, 5) //input id = 4
-
-			net.WriteUInt(args[1], 4) //animation channel
-			net.WriteUInt(args[2], 2) //loop mode id
-
-		elseif input == "setloopdelay" then
-
-			net.WriteUInt(5, 5) //input id = 5
-
-			net.WriteUInt(args[1], 4) //animation channel
-			net.WriteFloat(args[2]) //loop delay
-
-		elseif input == "setnumpad" then
-
-			net.WriteUInt(6, 5) //input id = 6
-
-			net.WriteUInt(args[1], 4) //animation channel
-			net.WriteInt(args[2], 11) //numpad key id (again, no idea what the max number of keys is so we'll say it's 1024 just to be safe)
-
-		elseif input == "setnumpadtoggle" then
-
-			net.WriteUInt(7, 5) //input id = 7
-
-			net.WriteUInt(args[1], 4) //animation channel
-			net.WriteBool(args[2]) //enable/disable numpad toggle
-
-		elseif input == "setnumpadstarton" then
-
-			net.WriteUInt(8, 5) //input id = 8
-
-			net.WriteUInt(args[1], 4) //animation channel
-			net.WriteBool(args[2]) //enable/disable numpad start on
-
-		elseif input == "setnumpadmode" then
-
-			net.WriteUInt(9, 5) //input id = 9
-
-			net.WriteUInt(args[1], 4) //animation channel
-			net.WriteUInt(args[2], 2) //numpad mode id
-
-		elseif input == "setstartorendpoint" then
-
-			net.WriteUInt(10, 5) //input id = 10
-
-			net.WriteUInt(args[1], 4) //animation channel
-			net.WriteBool(args[2]) //false = start point, true = end point
-			net.WriteFloat(args[3]) //new point
-
-		//Pose Parameter inputs
-		elseif input == "setposeparam" then
-
-			net.WriteUInt(11, 5) //input id = 11
-
-			net.WriteInt(args[1], 11) //pose parameter id (again, no idea what the max number of keys is so we'll say it's 1024 just to be safe)
-			net.WriteFloat(args[2]) //pose value
-
-		elseif input == "setcontrolmovementposeparams" then
-
-			net.WriteUInt(12, 5) //input id = 12
-
-			net.WriteBool(args[1]) //enable/disable control movement pose params
-
-		//Physics inputs
-		elseif input == "setmodelscale" then
-
-			net.WriteUInt(13, 5) //input id = 13
-
-			net.WriteFloat(args[1]) //model scale
-
-		elseif input == "setphysicsmode" then
-
-			net.WriteUInt(14, 5) //input id = 14
-
-			net.WriteUInt(args[1], 2) //physics mode id
-
-		elseif input == "setnophysicsbeloworigin" then
-
-			net.WriteUInt(15, 5) //input id = 15
-
-			net.WriteBool(args[1]) //enable/disable physics below model origin
-
-		//TODO: this should be with anim inputs
-		elseif input == "setlayersetting" then
-
-			net.WriteUInt(16, 5) //input id = 16
-
-			net.WriteUInt(args[1], 4) //animation channel
-			net.WriteUInt(args[2], 2) //which value in the vector to change: 0 = x/layerblendin, 1 = y/layerblendout, 2 = z/layerweight
-			net.WriteFloat(args[3]) //setting value
-
-		//Remapping inputs
-		elseif input == "getpuppeteerwithtool" then
-
-			net.WriteUInt(17, 5) //input id = 17
-
-		elseif input == "setpuppeteermodel" then
-
-			net.WriteUInt(18, 5) //input id = 18
-
-			net.WriteString(args[1]) //puppeteer model path
-
-		elseif input == "setpuppeteeralpha" then
-
-			net.WriteUInt(19, 5) //input id = 19
-
-			net.WriteBool(args[1]) //0/1 puppeteer alpha value
-
-		elseif input == "setpuppeteerpos" then
-
-			net.WriteUInt(20, 5) //input id = 20
-
-			net.WriteVector(args[1])
-
-		//TODO: this should probably be below physics ones or something?
-		elseif input == "setenableanimeventeffects" then
-
-			net.WriteUInt(21, 5) //input id = 21
-
-			net.WriteBool(args[1]) //enable/disable animevent effects
-
-		elseif input == "setragdollizeondamage" then
-			
-			net.WriteUInt(22, 5) //input id = 22
-
-			net.WriteBool(args[1]) //enable/disable animevent effects
-
-		end
-
-	net.SendToServer()
-
 end
 
 
