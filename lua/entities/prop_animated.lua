@@ -4336,12 +4336,14 @@ if SERVER then
 		//Remove the constraint
 		self.AdvBone_ConstraintEnt:Remove()
 
-		local _, bboxtop1 = parent:GetCollisionBounds()						//move the unmerged ent above its old parent, with some height to spare -
-		local bboxtop2, _ = self:GetCollisionBounds()						//position is the center of the parent + the parent's height + the unmerged
-		local height = ( Vector(0,0,bboxtop1.z) + Vector(0,0,-bboxtop2.z) ) + Vector(0,0,25)	//ent's height + some empty space between them
 		timer.Simple(0.1, function()
-			if !IsValid(self) then return end
-			self:SetPos(parent:GetPos() + height)
+			if !IsValid(self) or !IsValid(parent) then return end
+
+			local _, bboxtop1 = parent:GetRotatedAABB(parent:GetCollisionBounds())
+			local bboxtop2, _ = self:GetRotatedAABB(self:GetCollisionBounds())
+			local height = bboxtop1.z + -bboxtop2.z + parent:GetPos().z
+
+			self:SetPos(Vector(parent:GetPos().x, parent:GetPos().y, height))
 		end)
 
 		//Reset our lighting origin so we aren't still inheriting the lighting of the thing we were merged to

@@ -388,6 +388,7 @@ if SERVER then
 		local ConstraintsToPreserve = {
 			["AdvBoneMerge"] = true,
 			["AttachParticleControllerBeam"] = true, //Advanced Particle Controller addon
+			["PartCtrl_Ent"] = true, //ParticleControlOverhaul
 			//["BoneMerge"] = true, //Bone Merger addon
 			["EasyBonemerge"] = true, //Easy Bonemerge Tool addon
 			["CompositeEntities_Constraint"] = true, //Composite Bonemerge addon
@@ -401,7 +402,7 @@ if SERVER then
 						if val == oldent then 
 							const[key] = prop 
 						//Transfer over bonemerged ents from other addons' bonemerge constraints, and make sure they don't get DeleteOnRemoved
-						elseif (const.Type == "EasyBonemerge" or const.Type == "CompositeEntities_Constraint") //doesn't work for BoneMerge, bah
+						elseif (const.Type == "EasyBonemerge" or const.Type == "CompositeEntities_Constraint" or const.Type == "PartCtrl_Ent") //doesn't work for BoneMerge, bah
 						and isentity(val) and IsValid(val) and val:GetParent() == oldent then
 							//MsgN("reparenting ", val:GetModel())
 							if const.Type == "CompositeEntities_Constraint" then
@@ -421,6 +422,16 @@ if SERVER then
 							const.Entity[tabnum].Index = prop:EntIndex()
 						end
 						entstab[const.Entity[tabnum].Index] = const.Entity[tabnum].Entity
+					end
+
+					if const.Type == "PartCtrl_Ent" and IsValid(const.Ent1) then
+						oldent:DontDeleteOnRemove(const.Ent1) //Make sure we also clear deleteonremove for unparented cpoints
+						//Tell clients to retrieve the updated info table (the constraint func will change the relevant value to point to our ent)
+						timer.Simple(0.1, function() //do this on a timer, otherwise the advbonemerge ent might not exist on the client yet when they receive the new table
+							net.Start("PartCtrl_InfoTableUpdate_SendToCl")
+								net.WriteEntity(const.Ent1)
+							net.Broadcast()
+						end)
 					end
 
 					//Now copy the constraint over to the prop
