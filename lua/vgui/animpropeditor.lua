@@ -43,7 +43,7 @@ end
 
 local function SliderValueChangedUnclampedMin(self, val)
 	//don't clamp the min value
-	val = math.Clamp( tonumber(val) or 0, tonumber(val) or 0, self:GetMax() )
+	val = math.min(tonumber(val) or 0, self:GetMax())
 
 	self.Slider:SetSlideX( self.Scratch:GetFraction( val ) )
 
@@ -56,7 +56,7 @@ end
 
 local function SliderSetValueUnclampedMin(self, val)
 	//don't clamp the min value
-	val = math.Clamp( tonumber(val) or 0, tonumber(val) or 0, self:GetMax() )
+	val = math.min(tonumber(val) or 0, self:GetMax())
 	
 	if ( self:GetValue() == val ) then return end
 
@@ -67,7 +67,7 @@ end
 
 local function SliderValueChangedUnclampedMax(self, val)
 	//don't clamp the max value
-	val = math.Clamp( tonumber(val) or 0, self:GetMin(), tonumber(val) or 0 )
+	val = math.max(tonumber(val) or 0, self:GetMin())
 
 	self.Slider:SetSlideX( self.Scratch:GetFraction( val ) )
 
@@ -80,7 +80,7 @@ end
 
 local function SliderSetValueUnclampedMax(self, val)
 	//don't clamp the max value
-	val = math.Clamp( tonumber(val) or 0, self:GetMin(), tonumber(val) or 0 )
+	val = math.max(tonumber(val) or 0, self:GetMin())
 	
 	if ( self:GetValue() == val ) then return end
 
@@ -520,6 +520,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 					end
 					if newtext != text2:GetText() then
 						text2:SetText(newtext)
+						text2:SizeToContents()
 					end
 				else
 					pnldisabled:SetAlpha(0)

@@ -1671,8 +1671,6 @@ if SERVER then
 
 		elseif input == 17 then //Get puppeteer with tool
 
-			local tool = ply:GetTool("animprops")
-
 			if !IsValid(ply) then return end
 			if !GetConVar("toolmode_allow_animprops"):GetBool() then return end //TODO: this was copied from advbonemerge, which also does a CanTool check with a fake trace. is that necessary here?
 
