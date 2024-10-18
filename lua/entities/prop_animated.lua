@@ -450,6 +450,16 @@ end
 
 
 
+//Ignore certain non-physics constraints for effect physics
+local ConstraintsToPreserve = {
+	["AdvBoneMerge"] = true,
+	["AttachParticleControllerBeam"] = true, //Advanced Particle Controller addon
+	["PartCtrl_Ent"] = true, //ParticleControlOverhaul
+	["BoneMerge"] = true, //Bone Merger addon
+	["EasyBonemerge"] = true, //Easy Bonemerge Tool addon
+	["CompositeEntities_Constraint"] = true, //Composite Bonemerge addon
+}
+
 function ENT:Think()
 
 	if SERVER then
@@ -523,13 +533,22 @@ function ENT:Think()
 		if self:GetPhysicsMode() == 2 then
 			local phys = self:GetPhysicsObject()
 			if IsValid(phys) and !phys:IsAsleep() and !self:IsPlayerHolding() then //and !self:IsConstrained() then
-				phys:SetVelocity(vector_origin)
-				phys:AddAngleVelocity( -(phys:GetAngleVelocity()) ) //since SetAngleVelocity doesn't exist
-				phys:Sleep() //this doesn't work well when called in think; the position of the physobj can get out of sync with the entity visuals if it was moving
-				//phys:EnableMotion(false)
-				//calling phys:Sleep() in think can cause the position of the physobj to get out of sync with the entity visuals if it was moving, so let's fix that
-				phys:SetPos(self:GetPos())
-				phys:SetAngles(self:GetAngles())
+				local constrained = false
+				for k, v in pairs (constraint.GetTable(self)) do
+					if !ConstraintsToPreserve[v.Type] then
+						constrained = true
+						break
+					end
+				end
+				if !constrained then
+					phys:SetVelocity(vector_origin)
+					phys:AddAngleVelocity( -(phys:GetAngleVelocity()) ) //since SetAngleVelocity doesn't exist
+					phys:Sleep() //this doesn't work well when called in think; the position of the physobj can get out of sync with the entity visuals if it was moving
+					//phys:EnableMotion(false)
+					//calling phys:Sleep() in think can cause the position of the physobj to get out of sync with the entity visuals if it was moving, so let's fix that
+					phys:SetPos(self:GetPos())
+					phys:SetAngles(self:GetAngles())
+				end
 			end
 		end
 
