@@ -5,9 +5,6 @@ AddCSLuaFile()
 if CLIENT then return end
 //if SERVER then return end //uncomment this when we need to use the old tool for something
 
-
-
-
 duplicator.RegisterEntityClass("animprop_generic", function(ply, data)
 
 	//Create a dummy entity with the data table and convert it into an animprop
@@ -23,7 +20,6 @@ duplicator.RegisterEntityClass("animprop_generic", function(ply, data)
 	if !IsValid(dummy) then return end
 	local animprop = ConvertEntityToAnimprop(dummy, ply, true, true)
 	if !IsValid(animprop) then dummy:Remove() return end
-
 
 	//Convert animation settings
 	animprop:SetChannel1Sequence(animprop:LookupSequence(data.MyAnim)) //sequence is stored as name string instead of id number
@@ -77,13 +73,9 @@ duplicator.RegisterEntityClass("animprop_generic", function(ply, data)
 		if IsValid(phys) then phys:EnableMotion(false) end //also make sure we don't get pushed away by the world if we're flush against it
 	end
 
-
 	return animprop
 
 end, "Data")
-
-
-
 
 duplicator.RegisterEntityClass("animprop_generic_physmodel", function(ply, data)
 
@@ -129,13 +121,9 @@ duplicator.RegisterEntityClass("animprop_generic_physmodel", function(ply, data)
 
 		end
 
-
-
 		//If the physmodel is orphaned somehow and doesn't have an associated animprop, then remove it and stop here
 		local ouranimprop = FindPhysmodelAnimprop(dummy)
 		if ouranimprop == dummy then dummy:Remove() return end
-
-
 
 		//We need to move all the constraints from the physmodel to its animprop, but some of the constraints won't be created correctly for some reason if we apply them 
 		//in the first think, so instead we're making a table of constraints in the first think, and then checking for that table here so it gets used in the second think.
@@ -191,30 +179,8 @@ duplicator.RegisterEntityClass("animprop_generic_physmodel", function(ply, data)
 
 end, "Data")
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 //"Premade" animprops were originally made because it wasn't possible to add their particle effects or multiple models yourself at the time. Nowadays, though, we have the adv particle
 //controller (for particle effects) and the adv bonemerge tool (for multiple models), so they really aren't necessary any more. Spawn regular animprops modified with those tools instead.
-
-
-
 
 duplicator.RegisterEntityClass("animprop_spawnacarrier", function(ply, data)
 
@@ -268,9 +234,6 @@ duplicator.RegisterEntityClass("animprop_spawnacarrier", function(ply, data)
 	return animprop
 	
 end, "Data")
-
-
-
 
 local function SpawnTeleporter(ply, data, team, level, entrance)
 
@@ -384,9 +347,6 @@ duplicator.RegisterEntityClass("animprop_spawnexit_red3", function(ply, data)
 	return SpawnTeleporter(ply, data, 0, 3, false)
 end, "Data")
 
-
-
-
 local function SpawnMiniSentry(ply, data, team)
 
 	data.Model = "models/buildables/sentry1.mdl"
@@ -449,9 +409,6 @@ duplicator.RegisterEntityClass("animprop_spawnminisentry_red", function(ply, dat
 	return SpawnMiniSentry(ply, data, 0)
 end, "Data")
 
-
-
-
 local function SpawnTank(ply, data, bodyseq, treadseq, bombseq)
 
 	//data.Model = "models/bots/boss_bot/boss_tank.mdl" //this pre-made prop actually had an editable model and skin so players could use damaged tank models or the final tank skin
@@ -474,7 +431,7 @@ local function SpawnTank(ply, data, bodyseq, treadseq, bombseq)
 	animprop:SetPhysicsMode(0) //use prop physics
 	if data.IsPhysified and data.ConfirmationID then
 		animprop.ConfirmationID = data.ConfirmationID  //this was used by the "physmodel" entity to associate itself with the animprop - we don't need a separate entity 
-	end						       //for this any more, but we still need to match them up so we can move the constraints over to the animprop
+	end
 
 	//Create more animprops for the detail parts
 	local function CreateDetailAnimprop(model, seqstr)
@@ -517,7 +474,7 @@ local function SpawnTank(ply, data, bodyseq, treadseq, bombseq)
 	end
 
 	return animprop
-	
+
 end
 
 duplicator.RegisterEntityClass("animprop_spawntank", function(ply, data)

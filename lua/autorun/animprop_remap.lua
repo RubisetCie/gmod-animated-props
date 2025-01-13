@@ -7,9 +7,6 @@ AddCSLuaFile()
 if CLIENT then return end
 Animprop_RemapTranslationSkeletons = {
 
-
-
-
 //HL2 Human Alternate (cheaple.mdl, corpse1.mdl, classic_legs.mdl, fast.mdl, poison.mdl, fast_torso.mdl, zombie_soldier_legs/torso.mdl, soldier_stripped.mdl)
 //This is a variant of the HL2 skeleton where the root bone is called "ValveBiped.Bip01" instead of "ValveBiped.Bip01_Pelvis".
 //Check for this FIRST, because some models that use this skeleton (classic_legs.mdl, fast.mdl, fast_torso.mdl, zombie_soldier_legs/torso.mdl, soldier_stripped.mdl) ALSO have a ValveBiped.Bip01_Pelvis
@@ -77,9 +74,6 @@ Animprop_RemapTranslationSkeletons = {
 "ValveBiped.Bip01_R_Finger02",
 },
 
-
-
-
 //HL2 Human / Gmod Player / CSS Player/Hostage / L4D2 Survivor(? tested with mods only, not models from game)
 {
 "ValveBiped.Bip01_Pelvis",
@@ -142,9 +136,6 @@ Animprop_RemapTranslationSkeletons = {
 "ValveBiped.Bip01_R_Finger01",
 "ValveBiped.Bip01_R_Finger02",
 },
-
-
-
 
 //HL2 Vortigaunt
 {
@@ -209,9 +200,6 @@ Animprop_RemapTranslationSkeletons = {
 "",
 },
 
-
-
-
 //HL2 Dog
 {
 "Dog_Model.Pelvis",
@@ -274,9 +262,6 @@ Animprop_RemapTranslationSkeletons = {
 "Dog_Model.Thumb2_R",
 "Dog_Model.Thumb3_R",
 },
-
-
-
 
 //TF2 Player
 {
@@ -341,9 +326,6 @@ Animprop_RemapTranslationSkeletons = {
 "bip_thumb_2_R",
 },
 
-
-
-
 //HL1 Barney/Gman/Zombie/Hgrunt/Assassin/Holo/Vort/Agrunt/Controller/Garg
 {
 "Bip01 Pelvis",
@@ -407,9 +389,6 @@ Animprop_RemapTranslationSkeletons = {
 "Bip01 R Finger42",
 },
 
-
-
-
 //HL1 Scientist
 {
 "Bip02 Pelvis",
@@ -472,9 +451,6 @@ Animprop_RemapTranslationSkeletons = {
 "Bip02 R Finger41",
 "Bip02 R Finger42",
 },
-
-
-
 
 } //end of table
 //TODO: Portal, Portal 2, L4D, L4D2, CS:GO, whatever other mountable games people will want to use (fingerposer code says insurgency has its own skeleton naming conventions)

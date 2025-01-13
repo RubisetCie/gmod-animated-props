@@ -43,9 +43,6 @@ if CLIENT then
 	language.Add("tool.animprops.reload1", "Cancel puppeteer selection")
 end
 
-
-
-
 function TOOL:LeftClick(trace)
 
 	if self:GetStage() != 0 then return false end
@@ -73,9 +70,6 @@ function TOOL:LeftClick(trace)
 	return true
 
 end
-
-
-
 
 function TOOL:RightClick(trace)
 
@@ -122,9 +116,6 @@ function TOOL:RightClick(trace)
 
 end
 
-
-
-
 function TOOL:Reload()
 
 	//Clear the nwentity on reload
@@ -137,9 +128,6 @@ function TOOL:Reload()
 
 end
 
-
-
-
 function TOOL:GetStage()
 
 	local ent = self:GetWeapon():GetNWEntity("Animprops_CurEntity")
@@ -151,9 +139,6 @@ function TOOL:GetStage()
 	end
 
 end
-
-
-
 
 if SERVER then
 
@@ -187,9 +172,6 @@ if SERVER then
 	end
 
 end
-
-
-
 
 function TOOL.BuildCPanel(panel)
 

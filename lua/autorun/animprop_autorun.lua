@@ -1,8 +1,5 @@
 AddCSLuaFile()
 
-
-
-
 if SERVER then
 
 	util.AddNetworkString("AnimProp_OpenEditMenu_SendToCl")
@@ -101,9 +98,6 @@ else
 
 end
 
-
-
-
 properties.Add("editanimprop", {
 	MenuLabel = "Edit Animated Prop..",
 	Order = 90002,
@@ -127,14 +121,10 @@ properties.Add("editanimprop", {
 	end
 })
 
-
-
-
 properties.Add("makeanimprop", {
 	MenuLabel = "Convert to Animated Prop",
 	Order = 1600,
 	MenuIcon = "icon16/film_add.png",
-	
 	Filter = function(self, ent, ply)
 
 		if !IsValid(ent) then return false end
@@ -153,7 +143,7 @@ properties.Add("makeanimprop", {
 	end,
 
 	Action = function(self, ent)
-	
+
 		self:MsgStart()
 			net.WriteEntity(ent)
 		self:MsgEnd()
@@ -163,9 +153,9 @@ properties.Add("makeanimprop", {
 	end,
 
 	Receive = function(self, length, ply)
-	
+
 		local ent = net.ReadEntity()
-		
+
 		if !IsValid(ent) then return false end
 		if !properties.CanBeTargeted(ent, ply) then return false end
 		if !util.IsValidModel(ent:GetModel()) then return false end
@@ -178,9 +168,6 @@ properties.Add("makeanimprop", {
 
 	end
 } )
-
-
-
 
 if SERVER then
 
@@ -203,7 +190,6 @@ if SERVER then
 		local oldent = ent
 		if ent:GetClass() == "prop_effect" and ent.AttachedEntity then ent = ent.AttachedEntity end
 
-
 		local prop = ents.Create("prop_animated")
 		prop:SetPos(ent:GetPos())
 		if ent:GetClass() == "prop_ragdoll" and IsValid(ply) then
@@ -214,7 +200,6 @@ if SERVER then
 			prop:SetAngles(ent:GetAngles())
 		end
 		if IsValid(ply) then prop:SetPlayer(ply) end
-
 
 		//Copy all of the ent's information to the animprop
 		prop:SetModel(ent:GetModel() or "models/error.mdl")
@@ -289,7 +274,6 @@ if SERVER then
 		else
 			prop:SetModelScale(ent:GetModelScale())
 		end
-
 
 		//Set NWVar defaults
 		for i = 1, 4 do
@@ -367,7 +351,6 @@ if SERVER then
 		//Carry over DisableBeardFlexifier
 		prop:SetNWBool("DisableBeardFlexifier", ent:GetNWBool("DisableBeardFlexifier"))
 
-
 		if IsValid(ply) then
 			//Tell the entity to open up the clientside edit menu for this player once it's done spawning
 			if !disableeditmenu then
@@ -375,14 +358,12 @@ if SERVER then
 			end
 		end
 
-
 		//Spawn the entity and then apply entity modifiers - we need to spawn the entity for these to work, so do these last
 		prop:Spawn()
 		prop.EntityMods = ent.EntityMods
 		prop.BoneMods = ent.BoneMods
 		duplicator.ApplyEntityModifiers(ply, prop)
 		duplicator.ApplyBoneModifiers(ply, prop)
-
 
 		//Copy certain non-physics constraints over to the animprop
 		local ConstraintsToPreserve = {
@@ -440,7 +421,6 @@ if SERVER then
 			end
 		end
 
-
 		//Freeze the prop
 		if freeze then
 			local phys = prop:GetPhysicsObject()
@@ -451,7 +431,6 @@ if SERVER then
 				end
 			end
 		end
-
 
 		//Add an undo entry
 		if IsValid(ply) then
@@ -465,10 +444,8 @@ if SERVER then
 			ply:AddCount("animprops", prop)
 		end
 
-
 		oldent:Remove()
 
-		
 		DoPropSpawnedEffect(prop)
 		return prop
 
@@ -476,17 +453,11 @@ if SERVER then
 
 end
 
-
-
-
 //Cleanup and limit
 cleanup.Register("animprops")
 if SERVER then
 	CreateConVar("sbox_maxanimprops", "8", {FCVAR_ARCHIVE, FCVAR_NOTIFY, FCVAR_REPLICATED}, "Maximum animated props a single player can create")
 end
-
-
-
 
 //Draw name and position of selected bones if editor window's remapping tab is open
 //And the award for ugliest nested "if x then" checks goes to...
@@ -541,12 +512,9 @@ if CLIENT then
 	end)
 end
 
-
-
-
 //Keepupright constraint variant (from lua/includes/modules/constraint.lua) for prop_animated, to get around its restriction to prop_physics only
 function Keepupright_animprop( Ent, Ang, Bone, angularlimit )
-	
+
 	if CLIENT then return end
 
 	if ( !constraint.CanConstrain( Ent, Bone ) ) then return false end
@@ -560,13 +528,13 @@ function Keepupright_animprop( Ent, Ang, Bone, angularlimit )
 
 	//onStartConstraint( Ent )
 
-		local Constraint = ents.Create( "phys_keepupright" )
-		//ConstraintCreated( Constraint )
-		Constraint:SetAngles( Ang )
-		Constraint:SetKeyValue( "angularlimit", angularlimit )
-		Constraint:SetPhysConstraintObjects( Phys, Phys )
-		Constraint:Spawn()
-		Constraint:Activate()
+	local Constraint = ents.Create( "phys_keepupright" )
+	//ConstraintCreated( Constraint )
+	Constraint:SetAngles( Ang )
+	Constraint:SetKeyValue( "angularlimit", angularlimit )
+	Constraint:SetPhysConstraintObjects( Phys, Phys )
+	Constraint:Spawn()
+	Constraint:Activate()
 
 	//onFinishConstraint( Ent )
 	constraint.AddConstraintTable( Ent, Constraint )
@@ -688,9 +656,6 @@ properties.Add( "keepupright_animprop_stop", {
 	end
 
 } )
-
-
-
 
 //Add a convar to show physboxes to the context menu's menubar
 if CLIENT then

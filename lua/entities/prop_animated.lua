@@ -19,10 +19,10 @@ if CLIENT then
 	killicon.AddAlias("prop_animated", "prop_physics")
 	language.Add("Undone_Animprop", "Undone Animated Prop")
 	language.Add("prop_animated", "Animated Prop")  //for killfeed notices
-    	language.Add("Cleanup_animprops", "Animated Props")
-   	language.Add("Cleaned_animprops", "Cleaned up all Animated Props")
+	language.Add("Cleanup_animprops", "Animated Props")
+	language.Add("Cleaned_animprops", "Cleaned up all Animated Props")
 	language.Add("SBoxLimit_animprops", "You've hit the Animated Prop limit!")
-   	language.Add("max_animprops", "Max Animated Props:")
+	language.Add("max_animprops", "Max Animated Props:")
 end
 
 //For ragdollize-on-damage PhysicsCollide damage (physics damage isn't actually implemented on scripted entities or npcs by default, we have to recreate the valve code from scratch)
@@ -50,15 +50,15 @@ if SERVER then
 			{ impulse = 200*200, damage = 50 },
 			{ impulse = 250*250, damage = 500 },
 		},
-	
+
 		minSpeedSqr = 24*24,		//minimum linear speed squared
 		minRotSpeedSqr =  360*360,	//minimum angular speed squared (360 deg/s to cause spin/slice damage)
 		minMass = 2,			//can't take damage from anything under 2kg
-	
+
 		smallMassMax = 5,		//anything less than 5kg is "small"
 		smallMassCap = 5,		//never take more than 5 pts of damage from anything under 5kg
 		smallMassMinSpeedSqr = 36*36,	//<5kg objects must go faster than 36 in/s to do damage
-	
+
 		largeMassMin = 500,		//large mass in kg 
 		largeMassScale = 4,		//large mass scale (anything over 500kg does 4X as much energy to read from damage table)
 		largeMassFallingScale = 5,	//large mass falling scale (emphasize falling/crushing damage over sideways impacts since the stress will kill you anyway)
@@ -244,9 +244,6 @@ if SERVER then
 	end
 end
 
-
-
-
 function ENT:SetupDataTables()
 
 	self:NetworkVar("Int", 0, "Channel1Sequence")
@@ -328,9 +325,6 @@ function ENT:SetupDataTables()
 	self:NetworkVar("Vector", 3, "PuppeteerPos")
 
 end
-
-
-
 
 function ENT:Initialize()
 
@@ -447,9 +441,6 @@ function ENT:Initialize()
 
 end
 
-
-
-
 //Ignore certain non-physics constraints for effect physics
 local ConstraintsToPreserve = {
 	["AdvBoneMerge"] = true,
@@ -465,7 +456,6 @@ function ENT:Think()
 	if SERVER then
 
 		local time = CurTime()
-
 
 		//Set up a few things here instead of in Initialize.
 		//If we do these in Initialize, the entity won't exist clientside yet, and clients will receive the changes but discard them.
@@ -493,10 +483,9 @@ function ENT:Think()
 					net.WriteVector(self.EyeTargetLocal)
 				net.Broadcast()
 			end
-			
+
 			self.SetupInThink = nil
 		end
-
 
 		//If the player changed the model scale, then update physics
 		local scale = self:GetModelScale()
@@ -520,14 +509,12 @@ function ENT:Think()
 			AdvBone_ResetBoneChangeTime(self)
 		end
 
-
 		//Update physics
 		if self.ThinkUpdateAnimpropPhysics and time >= self.ThinkUpdateAnimpropPhysicsTime then
 			self:UpdateAnimpropPhysics()
 			self.ThinkUpdateAnimpropPhysics = false
 			self.ThinkUpdateAnimpropPhysicsTime = time + 0.35 //throttle physics updates so they don't update a ton of times whenever someone uses the scale slider
 		end
-
 
 		//Effect physics (ai ents don't run ENT:PhysicsUpdate() so we have to do it here)
 		if self:GetPhysicsMode() == 2 then
@@ -551,7 +538,6 @@ function ENT:Think()
 				end
 			end
 		end
-
 
 		//Loop the animation channels
 		for i = 1, 4 do
@@ -619,7 +605,6 @@ function ENT:Think()
 
 		end
 
-
 		//(Advanced Bonemerge) If we had to give our parent entity a placeholder name to get our lighting origin to work properly (see advbonemerge constraint function), then remove it here
 		local parent = self:GetParent()
 		if IsValid(parent) and parent.AdvBone_PlaceholderName then
@@ -633,7 +618,6 @@ function ENT:Think()
 			parent.AdvBone_PlaceholderName = nil
 		end
 
-
 		//Detect whether we're in the 3D skybox, and network that to clients to use in the Draw function because they can't detect it themselves
 		//(sky_camera ent is serverside only and ent:IsEFlagSet(EFL_IN_SKYBOX) always returns false)
 		local skycamera = ents.FindByClass("sky_camera")
@@ -644,7 +628,6 @@ function ENT:Think()
 				self:SetNWBool("IsInSkybox", inskybox)
 			end
 		end
-
 
 		//If we want to ragdollize on damage, then make sure we have a health value, because some sources of damage check for this before actually inflicting damage (example: hl1 sweps crossbow)
 		if self:GetRagdollizeOnDamage() then
@@ -660,7 +643,6 @@ function ENT:Think()
 		if self.DoRagdollizeOnDamage and time >= self.DoRagdollizeOnDamage.time then
 			self.DoRagdollizeOnDamage = nil
 		end
-
 
 		self:NextThink(time)
 		return true
@@ -682,7 +664,6 @@ function ENT:Think()
 
 		local time = CurTime()
 		local parent = self:GetParent()
-
 
 		//(Advanced Bonemerge) (Remapping) If an animation is playing, don't let BuildBonePositions fall asleep
 		if self.IsPuppeteer or (table.Count(self.AdvBone_BoneManips) > 0 and !IsValid(self:GetPuppeteer())) then //don't do all these checks if we're not running buildbonepositions, or if our puppeteer is doing it for us
@@ -768,8 +749,6 @@ function ENT:Think()
 			self:SetRenderOrigin()
 			self:SetRenderAngles()
 		end
-
-
 
 		//(Remapping) Set puppeteer's offset from parent and render bounds
 		if self.IsPuppeteer then
@@ -879,7 +858,6 @@ function ENT:Think()
 
 		end
 
-
 		//Control in-code TF2 minigun animation
 		if self.MinigunAnimBone and self.MinigunAnimFrame != time then
 			//Don't do this more than once per frame or else it'll mess up
@@ -951,9 +929,6 @@ function ENT:Think()
 
 end
 
-
-
-
 if SERVER then
 
 	function ENT:StartAnimation(i,startframe)
@@ -991,7 +966,6 @@ if SERVER then
 		end
 		local durationfull = self:SequenceDuration(seq) / math.abs(speed)
 
-
 		//Set the next stop time and loop time for this channel
 		if speed >= 0 then
 			self.AnimNextStop[i] = CurTime() + duration - (durationfull * startframe)
@@ -1005,7 +979,6 @@ if SERVER then
 		elseif loopmode == 2 then
 			self.AnimNextLoop[i] = CurTime() + loopdelay
 		end
-
 
 		local numpadisdisabling = false
 		if self["GetChannel" .. i .. "NumpadMode"](self) == 0 then
@@ -1090,9 +1063,6 @@ if SERVER then
 
 	end
 
-
-
-
 	function ENT:NumpadSetState(i, newstate)
 
 		local mode = self["GetChannel" .. i .. "NumpadMode"](self)
@@ -1146,7 +1116,7 @@ if SERVER then
 
 		if !IsValid(ent) then return end
 		if !ent["GetChannel" .. i .. "NumpadState"] then return end  //if the function doesn't exist yet, not if the function returns false
-	
+
 		if ent["GetChannel" .. i .. "NumpadToggle"](ent) then
 			if keydown then
 				local state = ent["GetChannel" .. i .. "NumpadState"](ent)
@@ -1161,13 +1131,10 @@ if SERVER then
 		end
 
 		ent["NumpadKeyDown" .. i] = keydown
-	
+
 	end
 
 	numpad.Register("Animprop_Numpad", AnimpropNumpadFunction)
-
-
-
 
 	function ENT:UpdateAnimpropPhysics()
 
@@ -1240,7 +1207,6 @@ if SERVER then
 		if IsValid(phys) then
 			self:PhysicsDestroy()
 		end
-
 
 		//Physics prop
 		local mode = self:GetPhysicsMode()
@@ -1319,8 +1285,6 @@ if SERVER then
 				phys:Wake()
 			end
 
-			
-
 		//Physics box
 		elseif mode == 1 then
 
@@ -1394,7 +1358,6 @@ if SERVER then
 
 		end
 
-
 		local phys = self:GetPhysicsObject()
 		if IsValid(phys) and !motion then
 			phys:EnableMotion(false)
@@ -1405,7 +1368,6 @@ if SERVER then
 		end
 
 		self:RemoveSolidFlags(FSOLID_NOT_STANDABLE)
-
 
 		//Fix keepupright constraint breaking when recreating physobj
 		local consttab = constraint.FindConstraint(self, "Keepupright_animprop")
@@ -1424,9 +1386,6 @@ if SERVER then
 	end
 
 end
-
-
-
 
 //Networking for edit menu inputs
 local EditMenuInputs = {
@@ -1462,126 +1421,77 @@ EditMenuInputs = table.Flip(EditMenuInputs)
 //- net.Read gets the number, then retrieves its corresponding string with table.KeyFromValue(EditMenuInputs, input)
 //This lets us add as many networkable strings to this table as we want, without having to manually assign each one a number.
 
-
 if CLIENT then
 
 	function ENT:DoInput(input, ...)
 
 		net.Start("AnimProp_EditMenuInput_SendToSv")
-	
+
 			net.WriteEntity(self)
 			local args = {...}
-	
+
 			net.WriteUInt(EditMenuInputs[input], EditMenuInputs_bits)
 
 			if string.StartsWith(input, "channel_") then
 				net.WriteUInt(args[1], 3) //animation channel, 1-4
 			end
-	
+
 			//Animation menu inputs
 			if input == "channel_sequence" then
-	
 				net.WriteInt(args[2], 16) //sequence id (no idea what the max number of sequences is so we'll say it's 32767 to be extra safe (gmod playermodel with all wOS addons installed has 4428))
-	
 			elseif input == "channel_pause" then
-	
 				net.WriteBool(args[2]) //enable/disable pause
-	
 			elseif input == "channel_frame" then
-	
 				net.WriteFloat(args[2]) //cycle
-	
 			elseif input == "channel_speed" then
-	
 				net.WriteFloat(args[2]) //playback rate
-	
 			elseif input == "channel_loop_mode" then
-	
 				net.WriteUInt(args[2], 2) //loop mode id
-	
 			elseif input == "channel_loop_delay" then
-	
 				net.WriteFloat(args[2]) //loop delay
-	
 			elseif input == "channel_numpad_num" then
-	
 				net.WriteInt(args[2], 11) //numpad key id (again, no idea what the max number of keys is so we'll say it's 1024 just to be safe)
-	
 			elseif input == "channel_numpad_toggle" then
-	
 				net.WriteBool(args[2]) //enable/disable numpad toggle
-	
 			elseif input == "channel_numpad_starton" then
-	
 				net.WriteBool(args[2]) //enable/disable numpad start on
-	
 			elseif input == "channel_numpad_mode" then
-	
 				net.WriteUInt(args[2], 2) //numpad mode id
-	
 			elseif input == "channel_startendpoint" then
-	
 				net.WriteBool(args[2]) //false = start point, true = end point
 				net.WriteFloat(args[3]) //new point
-
 			elseif input == "channel_layersetting" then
-	
 				net.WriteUInt(args[2], 2) //which value in the vector to change: 0 = x/layerblendin, 1 = y/layerblendout, 2 = z/layerweight
 				net.WriteFloat(args[3]) //setting value
-	
 			//Pose Parameter inputs
 			elseif input == "poseparam_set" then
-	
 				net.WriteInt(args[1], 11) //pose parameter id (again, no idea what the max number of keys is so we'll say it's 1024 just to be safe)
 				net.WriteFloat(args[2]) //pose value
-	
 			elseif input == "poseparam_drive" then
-	
 				net.WriteBool(args[1]) //enable/disable control movement pose params
-	
 			//Physics inputs
 			elseif input == "phys_scale" then
-	
 				net.WriteFloat(args[1]) //model scale
-	
 			elseif input == "phys_mode" then
-	
 				net.WriteUInt(args[1], 2) //physics mode id
-	
 			elseif input == "phys_beloworigin" then
-	
 				net.WriteBool(args[1]) //enable/disable physics below model origin
-	
 			//Remapping inputs
 			//elseif input == "remap_getwithtool" then
-	
 			elseif input == "remap_model" then
-	
 				net.WriteString(args[1]) //puppeteer model path
-	
 			elseif input == "remap_alpha" then
-	
 				net.WriteBool(args[1]) //0/1 puppeteer alpha value
-	
 			elseif input == "remap_pos" then
-	
 				net.WriteVector(args[1])
-	
 			//Misc inputs
 			elseif input == "misc_animeventfx" then
-	
 				net.WriteBool(args[1]) //enable/disable animevent effects
-	
 			elseif input == "misc_ragdollizeondmg" then
-				
 				net.WriteBool(args[1]) //enable/disable ragdollize on damage
-	
 			end
-	
 		net.SendToServer()
-	
 	end
-	
 else
 
 	util.AddNetworkString("AnimProp_EditMenuInput_SendToSv")
@@ -1870,9 +1780,6 @@ else
 
 end
 
-
-
-
 if CLIENT then
 
 	function ENT:Ragdollize()
@@ -2093,7 +2000,7 @@ if CLIENT then
 					self:InvalidateBoneCache()
 					self:DrawModel()
 					self:SetupBones()
-				
+
 					//Now get scale values for non-physbones with "Scale with target bone" turned off, which need to scale against their parent physbone;
 					//this is mostly futile unless the physparent is scaled evenly, because of the difference in the axes the bones are scaled on
 					local function GetPhysParent(bone)
@@ -2157,7 +2064,7 @@ if CLIENT then
 
 				//Based off CreateServerRagdoll (https://github.com/ValveSoftware/source-sdk-2013/blob/master/mp/src/game/server/physics_prop_ragdoll.cpp#L1308), which is called by some other funcs (see serverside ragdollize func)
 				local dt = 0.1
-				
+
 				//Rewind the animation in each channel by 0.1 secs
 				local oldcycles = {}
 				local ent2 = self:GetPuppeteer()
@@ -2174,7 +2081,7 @@ if CLIENT then
 							numpadisdisabling = !numpadisdisabling
 						end
 					end
-		
+
 					local id = nil
 					if i != 1 then
 						id = animent["GetChannel" .. i .. "LayerID"](animent)
@@ -2416,7 +2323,7 @@ else
 		if !IsValid(rag) then return end
 		rag:SetModel(self:GetModel())
 		rag:Spawn()
-		
+
 		local resized = false
 		//If the bones could potentially be scaled, check the matrix scales
 		if math.Round(self:GetModelScale(),4) != 1 or IsValid(self:GetParent()) or self:HasBoneManipulations() then
@@ -2460,7 +2367,6 @@ else
 				end
 			end
 		end
-
 
 		rag:SetSkin(self:GetSkin())
 		//Copy bodygroups
@@ -2652,7 +2558,6 @@ else
 					end
 				else
 					//Based off CRagdollProp::InitRagdoll (https://github.com/ValveSoftware/source-sdk-2013/blob/master/mp/src/game/server/physics_prop_ragdoll.cpp#L677), which then calls RagdollCreate (https://github.com/ValveSoftware/source-sdk-2013/blob/master/mp/src/game/shared/ragdoll_shared.cpp#L406)
-					
 					local totalmass = 0
 					for i = 0, rag:GetPhysicsObjectCount() - 1 do
 						local phys = rag:GetPhysicsObjectNum(i)
@@ -2791,7 +2696,7 @@ else
 				end
 				if !IsValid(ply) then
 					ply = allPlayers[1] //we have no owner, weren't killed by a player, and no one can see us? things aren't looking good, but pick some random chump as a last
-				end			    //ditch effort. if this doesn't work, then we just won't ragdollize.
+				end
 			end
 
 			if IsValid(ply) then
@@ -2908,9 +2813,6 @@ else
 
 end
 
-
-
-
 //TODO: hl1 scientist's c1a4_dying_speech, push_button2, and more don't seem to be using either of these to play sounds; i think the anim is playing a scene or something and i don't think we have a hook for that
 
 if SERVER then
@@ -2945,13 +2847,6 @@ elseif CLIENT then
 		end
 
 	end
-
-end
-
-
-
-
-if CLIENT then
 
 	local Animprop_IsSkyboxDrawing = false
 
@@ -3016,14 +2911,12 @@ if CLIENT then
 			end
 		end
 
-
 		//Set the eye target: animprops have custom eye posing functionality that targets a point relative to the entity, 
 		//instead of a point in worldspace (like npcs) or a point relative to our eye attachment (like ragdolls)
 		local pos = self:LocalToWorld(self.EyeTargetLocal or Vector(1000,0,0))
 		self.DontLocalizeEyePose = true
 		self:SetEyeTarget(pos)
 		self.DontLocalizeEyePose = nil
-
 
 		//For some reason I can't explain, setting a puppeteer's alpha to 0 with SetColor causes its BuildBonePositions hook to stop running, making it useless as a puppeteer 
 		//(this ONLY happens with puppeteers, not other animprops or advbonemerged stuff!), so we need to handle its transparency in-code here.
@@ -3041,7 +2934,6 @@ if CLIENT then
 			//Reset blending value once we're done so it doesn't bleed into other draw funcs
 			render.SetBlend(1)
 		end
-
 
 		if !IsValid(self:GetParent()) then
 			//Don't draw the grip if there's no chance of us picking it up
@@ -3084,9 +2976,6 @@ if CLIENT then
 
 end
 
-
-
-
 function ENT:OnEntityCopyTableFinish(data)
 
 	//Don't store these DTvars
@@ -3116,7 +3005,6 @@ function ENT:OnEntityCopyTableFinish(data)
 		data.PuppeteerInfo = puppeteerinfo
 	end
 
-
 	//(Advanced Bonemerge)
 	//As it turns out, the game absolutely WILL store and even network ent:ManipulateBoneX(-1) (what we use for model origin manips) even though it's not a valid bone. 
 	//However, entity saving glosses over it since it only searches bones 0 and onward, so we have to save the information ourselves:
@@ -3124,22 +3012,19 @@ function ENT:OnEntityCopyTableFinish(data)
 	data.BoneManip = data.BoneManip or {}
 
 	local t = {}
-			
 	local s = self:GetManipulateBoneScale(-1)
 	local a = self:GetManipulateBoneAngles(-1)
 	local p = self:GetManipulateBonePosition(-1)
-			
+
 	if ( s != Vector(1, 1, 1) ) then t[ 's' ] = s end //scale
 	if ( a != angle_zero ) then t[ 'a' ] = a end //angle
 	if ( p != vector_origin ) then t[ 'p' ] = p end //position
-		
+
 	if ( table.Count( t ) > 0 ) then
 		data.BoneManip[-1] = t
 	end
 
-
 	data.AdvBone_BoneManips = nil //don't save this table, everything in it has already been saved in Data.BoneManip by the duplicator save function
-
 
 	//Store DisableBeardFlexifier nwbool
 	data.DisableBeardFlexifier = self:GetNWBool("DisableBeardFlexifier")
@@ -3257,35 +3142,6 @@ duplicator.RegisterEntityClass("prop_animated", function(ply, data)
 end, "Data")
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ///////////////////////
 //REMAPPING FUNCTIONS//
 ///////////////////////
@@ -3379,7 +3235,6 @@ if SERVER then
 			lol:Remove() //We don't need the ent to stick around. All we needed was for it to use FollowBone once.
 		end
 
-
 		if remapinfo then
 			self.RemapInfo = table.Copy(remapinfo)
 		else
@@ -3438,7 +3293,6 @@ if SERVER then
 			self.RemapInfo = remapinfo
 		end
 
-
 		animprop:DrawShadow(false)
 		animprop:SetPuppeteerAlpha(true)
 
@@ -3446,17 +3300,14 @@ if SERVER then
 		local min2, max2 = animprop:GetModelBounds()
 		animprop:SetPuppeteerPos(Vector(0, max.y + -min2.y + 10, 0))
 
-
 		return animprop
 
 	end
-
 
 	util.AddNetworkString("AnimProp_RemapInfoTable_GetFromSv")
 	util.AddNetworkString("AnimProp_RemapInfoTable_SendToCl")
 	util.AddNetworkString("AnimProp_RemapInfoFromEditor_SendToSv")
 	util.AddNetworkString("AnimProp_RemapInfoTableUpdate_SendToCl")
-
 
 	//If we received a request for a remapinfo table, then send it to the client
 	net.Receive("AnimProp_RemapInfoTable_GetFromSv", function(_, ply)
@@ -3475,7 +3326,6 @@ if SERVER then
 			end
 		net.Send(ply)
 	end)
-
 
 	//If we received remapinfo from the client (for one specific bone, sent by using the editor window), then apply it to the table
 	net.Receive("AnimProp_RemapInfoFromEditor_SendToSv", function(_, ply)
@@ -3549,7 +3399,6 @@ else
 		end
 	end)
 
-
 	//If we received a message from the server telling us an ent's RemapInfo table is out of date, then change its RemapInfo_Received value so its Think function requests a new one
 	net.Receive("AnimProp_RemapInfoTableUpdate_SendToCl", function()
 		local ent = net.ReadEntity()
@@ -3559,35 +3408,6 @@ else
 	end)
 
 end
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 ////////////////////////////////
@@ -3851,10 +3671,6 @@ if CLIENT then
 		//TODO: currently, puppeteers can't fall asleep, because they don't generate bone matrices to check for changes on.
 		//figure out a way to let puppeteers fall asleep, by checking if their boneoffsets have changed or something?
 
-
-
-
-
 		//TODO: Animated props can have a different scale than their parent entity. Are there any situations where we should be using the parent's scale instead of our scale?
 		local mdlscl = math.Round(self:GetModelScale(),4) //we need to round these values or else the game won't think they're equal
 		local mdlsclvec = Vector(mdlscl,mdlscl,mdlscl)
@@ -4008,10 +3824,6 @@ if CLIENT then
 			//rotate the model and bones however they please. If the bone bounds are somehow bigger than the model bounds, then use 0 instead.
 			self.AdvBone_RenderBounds_Bloat = math.max(0, -(modelmins.x - bonemins.x), -(modelmins.y - bonemins.y), -(modelmins.z - bonemins.z), (modelmaxs.x - bonemaxs.x), (modelmaxs.y - bonemaxs.y), (modelmaxs.z - bonemaxs.z))
 		end
-
-
-
-
 
 		//these will be used to set our render bounds accordingly in the clientside think function
 		local highestbonescale = 0
@@ -4205,7 +4017,6 @@ if CLIENT then
 
 			end
 
-
 			if matr then  //matr can be nil if we're visible but our parent isn't
 
 				//Store a non-scaled version of our angles if we're scaling
@@ -4324,7 +4135,7 @@ if CLIENT then
 					else
 						SetBoneMinsMaxs(bonepos)
 					end
-					
+
 					//Apply the bone matrix
 					if self:GetBoneName(i) != "__INVALIDBONE__" then
 						self:SetBoneMatrix(i,matr)
@@ -4371,7 +4182,7 @@ if CLIENT then
 
 						self.SavedBoneMatrices[i] = matr
 					end
-					
+
 				end
 
 			end
@@ -4406,12 +4217,8 @@ if CLIENT then
 			end
 		end
 	end
-end
 
-
-
-
-if SERVER then
+elseif SERVER then
 
 	function ENT:CreateAdvBoneInfoTable(par, keepparentempty, matchnames)
 
@@ -4466,9 +4273,6 @@ if SERVER then
 
 	end
 
-
-
-
 	function ENT:Unmerge(ply)
 
 		if !IsValid(self) then return end
@@ -4520,9 +4324,6 @@ if SERVER then
 
 end
 
-
-
-
 //note 10/15/14: this is now duplicated code in both advbone and animpropoverhaul, lame
 if SERVER then
 
@@ -4553,40 +4354,11 @@ else
 end
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 //////////////////////
 //FUNCTION OVERRIDES//
 //////////////////////
 
 local meta = FindMetaTable("Entity")
-
 
 //If a trace hits an animated prop that normally has more physics objects (is usually a ragdoll), it can return a physobj id other than 0 (the one it would've hit if it'd been a ragdoll). 
 //This results in tools trying to retrieve a physobj that doesn't exist, so redirect them to physobj 0 instead:
@@ -4597,19 +4369,14 @@ if old_GetPhysicsObjectNum then
 	function meta.GetPhysicsObjectNum(ent, num, ...)
 
 		if isentity(ent) and IsValid(ent) and ent:GetClass() == "prop_animated" then
-
 			return ent:GetPhysicsObject()
-
 		else
-
 			return old_GetPhysicsObjectNum(ent, num, ...)
-
 		end
 
 	end
 
 end
-
 
 //Custom eye posing functionality for prop_animated - we want to save the eye target as a vector relative to the entity origin, 
 //so it moves with us but doesn't look weird by being anchored to the eye attachment or something
@@ -4622,7 +4389,7 @@ if old_SetEyeTarget then
 			
 			local localpos = self:WorldToLocal(pos)
 			self.EyeTargetLocal = localpos
-			
+
 			if SERVER then
 				//Send it to clients
 				net.Start("AnimProp_EyeTargetLocal_SendToCl")
@@ -4634,7 +4401,7 @@ if old_SetEyeTarget then
 		end
 
 		return old_SetEyeTarget(self, pos, ...)
-		
+
 	end
 
 end

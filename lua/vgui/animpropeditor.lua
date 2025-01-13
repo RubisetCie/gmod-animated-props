@@ -2,9 +2,6 @@ AddCSLuaFile()
 
 local PANEL = {}
 
-
-
-
 function PANEL:SetEntity(entity)
 	if self.m_Entity == entity then return end
 
@@ -12,9 +9,6 @@ function PANEL:SetEntity(entity)
 	self.m_Entity = entity
 	self.StoredModel = nil
 end
-
-
-
 
 //Function overrides for sliders to unclamp them
 local function SliderValueChangedUnclamped(self, val)
@@ -89,7 +83,6 @@ local function SliderSetValueUnclampedMax(self, val)
 	self:ValueChanged( self:GetValue() )
 end
 
-
 function PANEL:RebuildControls(tab, d, d2, d3)
 
 	self:Clear()
@@ -113,8 +106,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 	color_helpdark.r = math.max(0, color_helpdark.r - 40)
 	color_helpdark.g = math.max(0, color_helpdark.g - 40)
 	color_helpdark.b = math.max(0, color_helpdark.b - 40)
-
-
 
 	//Animations
 
@@ -167,9 +158,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 			return self:SetTextStyleColor(skin.Colours.Button.Normal)
 		end
-
-
-
 
 		local lpnl = vgui.Create("Panel", back)
 		lpnl:Dock(LEFT)
@@ -238,8 +226,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 		lpnl:InvalidateLayout()
 		lpnl:SizeToChildren(true,true)
 
-
-
 		local container = vgui.Create("DCategoryList", back)
 		container.Paint = function(self, w, h)
 			//derma.SkinHook("Paint", "CategoryList", self, w, h)
@@ -248,7 +234,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 		end
 		container:Dock(FILL)
 		container:DockMargin(2,0,0,0)
-		
 
 		//category for speed slider
 		//no collapsible category for this one, it's a basic option that should always be visible
@@ -288,8 +273,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			help:DockMargin(padding_help,betweenitems_help,padding_help,0)
 			help:Dock(TOP)
 			help:SetTextColor(color_helpdark)
-
-
 
 		//category for key
 		local cat = vgui.Create("DCollapsibleCategory", container)
@@ -352,7 +335,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 					back.NumpadStartOnCheckbox:SetValue(true)
 				end
 			end
-		
+
 			drop:SetHeight(25)
 			drop:Dock(TOP)
 			drop:DockMargin(padding,padding-9,padding,0) //-9 to base the "top" off the text, not the box
@@ -527,8 +510,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 				end
 			end
 
-
-
 		//category for repeats
 		local cat = vgui.Create("DCollapsibleCategory", container)
 		cat:SetLabel("Repeat Settings")
@@ -577,7 +558,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			function drop.Combo.OnSelect(_, index, value, data)
 				animent:DoInput("channel_loop_mode", i, data)
 			end
-		
+
 			drop:SetHeight(25)
 			drop:Dock(TOP)
 			drop:DockMargin(padding,padding-9,padding,0) //-9 to base the "top" off the text, not the box
@@ -616,8 +597,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 				animent:DoInput("channel_loop_delay", i, val)
 			end
 
-
-
 		//category for start/end points
 		local cat = vgui.Create("DCollapsibleCategory", container)
 		cat:SetLabel("End Points")
@@ -653,7 +632,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 				local otherval = 1
 				if back.EndPointSlider then otherval = back.EndPointSlider:GetValue() end
 				val = math.Clamp( tonumber(val) or 0, 0, otherval )
-	
+
 				if ( self:GetValue() == val ) then return end
 
 				self.Scratch:SetValue( val )
@@ -703,7 +682,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 				local otherval = 0
 				if back.StartPointSlider then otherval = back.StartPointSlider:GetValue() end
 				val = math.Clamp( tonumber(val) or 0, otherval, 1 )
-	
+
 				if ( self:GetValue() == val ) then return end
 
 				self.Scratch:SetValue( val )
@@ -750,8 +729,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			help:Dock(TOP)
 			help:SetTextColor(color_helpdark)
 
-
-
 		//For layers, add extra controls for layer settings
 		if i > 1 then
 
@@ -768,7 +745,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 				((animent["GetChannel" .. i .. "LayerSettings"](animent) or Vector(0,0,1)) != Vector(0,0,1))
 			)
 			back.LayerOptionsCategory = cat //make this specific category accessible by seekbar code
-	
+
 			local rpnl = vgui.Create("DSizeToContents", cat)
 			rpnl:Dock(FILL)
 			cat:SetContents(rpnl)
@@ -824,7 +801,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 				help:Dock(TOP)
 				help:SetTextColor(color_helpdark)
 				slider.help = help //let the think func of the above slider find this
-			
 
 				local slider = vgui.Create("DNumSlider", rpnl)
 				slider:SetText("Layer Blend In")
@@ -840,7 +816,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 					local otherval = 1
 					if back.BlendOutSlider then otherval = back.BlendOutSlider:GetValue() end
 					val = math.Clamp( tonumber(val) or 0, 0, otherval )
-	
+
 					if ( self:GetValue() == val ) then return end
 
 					self.Scratch:SetValue( val )
@@ -891,7 +867,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 					local otherval = 0
 					if back.BlendInSlider then otherval = back.BlendInSlider:GetValue() end
 					val = math.Clamp( tonumber(val) or 0, otherval, 1 )
-	
+
 					if ( self:GetValue() == val ) then return end
 
 					self.Scratch:SetValue( val )
@@ -963,8 +939,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 		container:AddItem(rpnl)
 		//rpnl.Paint = function(self, w, h) draw.RoundedBox(4, 0, 0, w, h, Color(0,0,0,70)) end
 		//rpnl:DockPadding(0,0,0,padding) //DSizeToContents is finicky and ignores the bottom dock margin of the lowermost item
-		
-
 
 		local divider = vgui.Create("DHorizontalDivider", back)
 		divider:Dock(FILL)
@@ -987,8 +961,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 				end
 			end
 		end
-
-
 
 		local trackpnl = vgui.Create("Panel", back)
 		trackpnl:Dock(BOTTOM)
@@ -1066,8 +1038,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			end
 			x = math.Clamp( x, 0, w ) / w
 			local duration = animent:SequenceDuration(animent["GetChannel" .. i .. "Sequence"](animent))
-
-
 			local menu = DermaMenu()
 
 			//Add custom start point
@@ -1268,9 +1238,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 	tabs:AddSheet("Animations", self.TabAnimations, "icon16/film.png")
 
-
-
-
 	//Pose Parameters
 
 	local container = vgui.Create("DPanel", tabs)
@@ -1376,7 +1343,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			check:SetHeight(15)
 			check:Dock(TOP)
 			check:DockMargin(padding,betweenitems,0,0)
-		
 			check:SetValue(animent:GetControlMovementPoseParams())
 			check.OnChange = function(_, val)
 				animent:DoInput("poseparam_drive", val)
@@ -1432,9 +1398,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 		end
 		sheet.Tab:GetPropertySheet():SetActiveTab(sheet.Tab)
 	end
-
-
-
 
 	//Remapping
 
@@ -1515,8 +1478,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 	pnl:DockPadding(0,0,0,padding) //DSizeToContents is finicky and ignores the bottom dock margin of the lowermost item
 
-
-
 	if IsValid(ent2) then
 
 		local function SendRemapInfoToServer()
@@ -1535,11 +1496,9 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 				ent.RemapInfo[entbone]["ang"] = newang
 
-
 				//Wake up BuildBonePositions and get it to use the new info
 				ent.RemapInfo_RemapAngOffsets = nil
 				ent.LastBoneChangeTime = CurTime()
-
 
 				//Then, send all of the information to the server so the duplicator can pick it up
 				net.Start("AnimProp_RemapInfoFromEditor_SendToSv")
@@ -1553,8 +1512,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 				net.SendToServer()
 			end
 		end
-
-
 
 		local lpnl = vgui.Create("Panel", back)
 		lpnl:Dock(LEFT)
@@ -1599,14 +1556,14 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 						if self.Icon then
 							self.Icon:SetImage("icon16/tick.png")
 						end
-  						surface.SetDrawColor(0,255,0,35)
+						surface.SetDrawColor(0,255,0,35)
 					else
 						if self.Icon then
 							self.Icon:SetImage("icon16/cross.png")
 						end
-					  	surface.SetDrawColor(255,0,0,35)
+						surface.SetDrawColor(255,0,0,35)
 					end
-    					surface.DrawRect(0, 0, w, h)
+						surface.DrawRect(0, 0, w, h)
 				end
 
 				local img = vgui.Create("DImage", line)
@@ -1661,8 +1618,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 		lpnl:InvalidateLayout()
 		lpnl:SizeToChildren(true,true)
-
-
 
 		--[[local rpnl = vgui.Create("DScrollPanel", back)
 		rpnl:Dock(TOP)
@@ -1754,8 +1709,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 				self.Menu = DermaMenu( false, self )
 
-
-
 				for k, v in SortedPairs( self.Choices ) do
 					local option = self.Menu:AddOption( v, function() self:ChooseOption( v, k ) end )
 					if back.TargetBoneList.selectedtargetbone == (k - 2) then option:SetChecked(true) end  //check the currently selected target bone
@@ -1766,7 +1719,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 				self.Menu:SetMinimumWidth( self:GetWide() )
 				self.Menu:Open( x, y, false, self )
 			end
-			
+
 			drop:SetHeight(25)
 			drop:Dock(TOP)
 			//drop:DockMargin(padding,padding-9,padding,0) //-9 to base the "top" off the text, not the box
@@ -1830,8 +1783,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			help:DockMargin(padding_help,betweenitems_help,padding_help,0)
 			help:Dock(TOP)
 			help:SetTextColor(color_helpdark)
-
-
 
 		--[[local rpnl2 = vgui.Create("DScrollPanel", back)
 		rpnl2:Dock(TOP)
@@ -1917,12 +1868,12 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			check:SetHeight(15)
 			check:Dock(TOP)
 			check:DockMargin(padding,betweenitems,0,0)
-	
+
 			check:SetValue(ent2:GetPuppeteerAlpha())
 			check.OnChange = function(_, val)
 				ent2:DoInput("remap_alpha", val)
 			end
-	
+
 			//not necessary? will players understand that these options are all visual and don't actually matter if there's a checkbox that hides the puppeteer entirely?
 			local help = vgui.Create("DLabel", rpnl)
 			help:SetDark(true)
@@ -1935,8 +1886,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			help:DockMargin(padding_help,betweenitems_help,padding_help,0)
 			help:Dock(TOP)
 			help:SetTextColor(color_helpdark)
-
-
 
 		//dummy category to fix bug where lowest category has broken lower padding
 		local rpnl = vgui.Create("DSizeToContents", container)
@@ -1998,9 +1947,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 	end
 
 	tabs:AddSheet("Remapping", back, "icon16/group.png")
-
-
-
 
 	//Misc. Settings
 
@@ -2065,7 +2011,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 		help:Dock(TOP)
 		help:SetTextColor(color_helpdark)
 
-
 		local drop = vgui.Create("Panel", pnl)
 
 		drop.Label = vgui.Create("DLabel", drop)
@@ -2118,14 +2063,13 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 		function drop.Combo.OnSelect(_, index, value, data)
 			ent:DoInput("phys_mode", data)
 		end
-		
+
 		drop:SetHeight(25)
 		drop:Dock(TOP)
 		drop:DockMargin(padding,betweenitems,padding,0)
 		function drop.PerformLayout(_, w, h)
 			drop.Label:SetWide(w / 2.4)
 		end
-
 
 		local check = vgui.Create( "DCheckBoxLabel", pnl)
 		self.PhysboxCheck = check
@@ -2152,7 +2096,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 		help:DockMargin(padding_help,betweenitems_help,padding_help,0)
 		help:Dock(TOP)
 		help:SetTextColor(color_helpdark)
-
 
 		local text = vgui.Create("DLabel", pnl)
 		text:SetDark(true)
@@ -2181,7 +2124,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 		cat:Dock(FILL)
 		container:AddItem(cat)
 		cat:SetExpanded(true)
-	
+
 		local pnl = vgui.Create("DSizeToContents", cat)
 		pnl:Dock(FILL)
 		cat:SetContents(pnl)
@@ -2262,7 +2205,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			check:SetHeight(15)
 			check:Dock(TOP)
 			check:DockMargin(padding,betweenitems*2,0,0) //double top margin to separate it from the more general ragdollize options
-	
+
 			check:SetValue(ent:GetRagdollizeOnDamage())
 			check.OnChange = function(_, val)
 				ent:DoInput("misc_ragdollizeondmg", val)
@@ -2326,9 +2269,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 	tabs:AddSheet("Misc. Settings", container, "icon16/cog.png")
 
-
-
-
 	//Restore the tab we had selected before, if applicable
 	if tab then
 		for _, info in pairs (tabs:GetItems()) do
@@ -2339,9 +2279,6 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 	end
 
 end
-
-
-
 
 function PANEL:BuildAnimationList(i, filter)
 
@@ -2378,9 +2315,6 @@ function PANEL:BuildAnimationList(i, filter)
 	self["SequenceListKey" .. i] = 1
 
 end
-
-
-
 
 local entriesperframe = 15
 
@@ -2446,7 +2380,6 @@ function PANEL:Think()
 		end
 	end
 
-
 	//Go through the sequence lists and create a few animation entries at a time each frame
 	for i = 1, 4 do
 		if self["SequenceList" .. i] and self["SequenceListKey" .. i] then
@@ -2496,13 +2429,7 @@ function PANEL:OnEntityLost()
 	-- For override
 end
 
-
-
-
 //function PANEL:OnRemove()
 //end
-
-
-
 
 vgui.Register("AnimpropEditor", PANEL, "Panel")
