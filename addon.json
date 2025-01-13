@@ -1,0 +1,12 @@
+{
+	"title": "Animated Props Overhaul",
+	"type": "tool",
+	"tags": [ "fun", "movie" ],
+	"ignore":
+	[
+		".git",
+		".github",
+		"*.md",
+		"LICENSE"
+	]
+}
