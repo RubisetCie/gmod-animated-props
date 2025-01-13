@@ -14,7 +14,7 @@
 //Update 3-10-24: this one's called "animprops" while the old one is called "animprop" so that they don't conflict when both addons are installed
 
 TOOL.Category = "Construction"
-TOOL.Name = "Animated Props"
+TOOL.Name = "#tool.animprops.name"
 TOOL.Command = nil
 TOOL.ConfigName = "" 
 
@@ -175,40 +175,15 @@ end
 
 function TOOL.BuildCPanel(panel)
 
-	panel:AddControl("Header", {Description = "#tool.animprops.help"})
+	panel:Help( "#tool.animprops.help" )
 
-	panel:AddControl("Label", {Text = "", Description = ""})
-	panel:AddControl("Label", {Text = "", Description = ""})
+	panel:TextEntry( "Model", "animprops_model" )
 
-	panel:AddControl("TextBox", {
-		Label = "Model", 
-		Command = "animprops_model", 
-	})
+	panel:NumSlider( "Skin", "animprops_skin", 0, 10, 0 )
 
-	panel:AddControl("Slider", {
-		Label = "Skin",
-	 	Type = "Integer",
-		Min = "0",
-		Max = "10",
-		Command = "animprops_skin",
-	})
+	panel:CheckBox( "Start frozen", "animprops_frozen" )
+	panel:CheckBox( "Show notifications", "animprops_notifications" )
 
-	panel:AddControl("CheckBox", {
-		Label = "Start frozen",
-		Command = "animprops_frozen"
-	})
-
-	panel:AddControl("Label", {Text = "", Description = ""})
-	panel:AddControl("Label", {Text = "", Description = ""})
-
-	panel:AddControl("CheckBox", {
-		Label = "Show notifications",
-		Command = "animprops_notifications"
-	})
-
-	panel:AddControl("CheckBox", {
-		Label = "Draw physics boxes",
-		Command = "cl_animprop_drawphysboxes"
-	})
+	panel:CheckBox( "Draw physics boxes", "cl_animprop_drawphysboxes" )
 
 end
