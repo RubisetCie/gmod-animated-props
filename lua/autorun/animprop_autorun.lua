@@ -661,9 +661,9 @@ properties.Add( "keepupright_animprop_stop", {
 if CLIENT then
 	CreateClientConVar("cl_animprop_drawphysboxes", "0", true, false, "Should animated props draw their physics box?", 0, 1)
 
-	hook.Add("PopulateMenuBar", "zzz_Animprop_MenuBar", function(menubar)
+	--[[hook.Add("PopulateMenuBar", "zzz_Animprop_MenuBar", function(menubar)
 		local m = menubar:AddOrGetMenu("#menubar.drawing")
 		m:AddSpacer()
 		m:AddCVar("Draw Animated Prop Physics Boxes", "cl_animprop_drawphysboxes", "1", "0")
-	end)
+	end)]]--
 end
