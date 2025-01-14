@@ -308,9 +308,9 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			drop.Combo:SetHeight(25)
 			drop.Combo:Dock(FILL)
 
-			local numpadmode0 = "Disable/enable animation"
-			local numpadmode1 = "Pause/unpause animation"
-			local numpadmode2 = "Restart animation"
+			local numpadmode0 = "Disable/Enable Animation"
+			local numpadmode1 = "Pause/Unpause Animation"
+			local numpadmode2 = "Restart Animation"
 			local val = animent["GetChannel" .. i .. "NumpadMode"](animent) or 0
 			if val == 0 then
 				drop.Combo:SetValue(numpadmode0)

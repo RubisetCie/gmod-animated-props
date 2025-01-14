@@ -181,9 +181,9 @@ function TOOL.BuildCPanel(panel)
 
 	panel:NumSlider( "Skin", "animprops_skin", 0, 10, 0 )
 
-	panel:CheckBox( "Start frozen", "animprops_frozen" )
-	panel:CheckBox( "Show notifications", "animprops_notifications" )
+	panel:CheckBox( "Start Frozen", "animprops_frozen" )
+	panel:CheckBox( "Show Notifications", "animprops_notifications" )
 
-	panel:CheckBox( "Draw physics boxes", "cl_animprop_drawphysboxes" )
+	panel:CheckBox( "Draw Physics Boxes", "cl_animprop_drawphysboxes" )
 
 end
