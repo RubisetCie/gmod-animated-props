@@ -1,5 +1,9 @@
 AddCSLuaFile()
 
+local vgui = vgui
+local draw = draw
+local math = math
+
 local PANEL = {}
 
 function PANEL:SetEntity(entity)

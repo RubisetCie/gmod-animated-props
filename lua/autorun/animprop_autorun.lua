@@ -8,14 +8,14 @@ else
 
 	local h_min = 167
 	local h_max = ScrH()
-	local w_min = 411	  //set to perfectly fit minimum width of both left and right sides of animation options divider
+	local w_min = 411			//set to perfectly fit minimum width of both left and right sides of animation options divider
 	local w_max = ScrW()
-	local d_min = 125         //NOTE: value is from divider min left width in animprop editor, make sure these numbers match!
-	local d_max = w_max - 250 //NOTE: value is from divider min right width in animprop editor, make sure these numbers match!
-	local d2_min = 187.5	  //NOTE: same as above but for poseparam divider
+	local d_min = 125			//NOTE: value is from divider min left width in animprop editor, make sure these numbers match!
+	local d_max = w_max - 250	//NOTE: value is from divider min right width in animprop editor, make sure these numbers match!
+	local d2_min = 187.5		//NOTE: same as above but for poseparam divider
 	local d2_max = w_max - 187.5//NOTE: same as above but for poseparam divider
-	local d3_min = 125         //NOTE: same as above but for remapping divider
-	local d3_max = w_max - 250 //NOTE: same as above but for remapping divider
+	local d3_min = 125			//NOTE: same as above but for remapping divider
+	local d3_max = w_max - 250	//NOTE: same as above but for remapping divider
 
 	CreateClientConVar("cl_animprop_editor_h", "500", true, false, "Height of the animated prop edit window", h_min, h_max) //default is min height to fit all remapping options without a scrollbar
 	CreateClientConVar("cl_animprop_editor_w", "600", true, false, "Width of the animated prop edit window", w_min, w_max)  //default is wide enough for anim and anim option names to be legible (seconds between repeats especially)

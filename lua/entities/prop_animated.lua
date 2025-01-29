@@ -1,6 +1,6 @@
 AddCSLuaFile()
 
-ENT.Base 			= "base_gmodentity"
+ENT.Base				= "base_gmodentity"
 ENT.PrintName			= "Animated Prop"
 
 ENT.Spawnable			= false
@@ -24,6 +24,11 @@ if CLIENT then
 	language.Add("SBoxLimit_animprops", "You've hit the Animated Prop limit!")
 	language.Add("max_animprops", "Max Animated Props:")
 end
+
+local CurTime = CurTime
+local timer = timer
+local net = net
+local math = math
 
 //For ragdollize-on-damage PhysicsCollide damage (physics damage isn't actually implemented on scripted entities or npcs by default, we have to recreate the valve code from scratch)
 local phys_impactforcescale
@@ -156,7 +161,6 @@ if SERVER then
 					energyScale = 3
 				end
 			end
-
 
 			local damage = 0
 
@@ -453,9 +457,9 @@ local ConstraintsToPreserve = {
 
 function ENT:Think()
 
-	if SERVER then
+	local time = CurTime()
 
-		local time = CurTime()
+	if SERVER then
 
 		//Set up a few things here instead of in Initialize.
 		//If we do these in Initialize, the entity won't exist clientside yet, and clients will receive the changes but discard them.
@@ -662,7 +666,6 @@ function ENT:Think()
 			end)
 		end
 
-		local time = CurTime()
 		local parent = self:GetParent()
 
 		//(Advanced Bonemerge) (Remapping) If an animation is playing, don't let BuildBonePositions fall asleep
