@@ -89,6 +89,8 @@ function QUATERNION:Set(w, x, y, z)
 	return self;
 end
 
+local math = math
+
 ---
 -- Set the quaternion using Euler angles.
 -- @param  ang An angle with 'p', 'y', and 'r' keys representing pitch, yaw, and roll angles.
@@ -516,12 +518,4 @@ end
 -- 
 function QUATERNION:Unpack()
 	return self.w, self.x, self.y, self.z;
-end
-
----
--- Convert the quaternion to a string representation.
--- @return string A string representing the quaternion.
---
-function QUATERNION:__tostring()
-	return string.format("%f %f %f %f", self:Unpack());
 end
