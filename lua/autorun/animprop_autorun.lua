@@ -1,5 +1,13 @@
 AddCSLuaFile()
 
+local IsValid = IsValid
+local surface = surface
+local draw = draw
+local math = math
+local net = net
+local color_white = color_white
+local color_black = color_black
+
 if SERVER then
 
 	util.AddNetworkString("AnimProp_OpenEditMenu_SendToCl")
@@ -290,7 +298,7 @@ if SERVER then
 			prop["SetChannel" .. i .. "EndPoint"](prop, 1)
 		end
 		for i = 2, 4 do
-			prop["SetChannel" .. i .. "LayerSettings"](prop, Vector(0,0,1))
+			prop["SetChannel" .. i .. "LayerSettings"](prop, vector_up)
 		end
 		//carry over the sequence if we convert something like an npc, but make sure ragdolls and the like still start out with no sequence
 		if ent:SequenceDuration() > 0 then
@@ -493,9 +501,9 @@ if CLIENT then
 									local _pos = _pos:ToScreen()
 									local textpos = {x = _pos.x+5,y = _pos.y-5}
 
-									draw.RoundedBox(0,_pos.x - 2,_pos.y - 2,4,4,Color(0,0,0,255))
-									draw.RoundedBox(0,_pos.x - 1,_pos.y - 1,2,2,Color(255,255,255,255))
-									draw.SimpleTextOutlined(_name,"Default",textpos.x,textpos.y,Color(255,255,255,255),TEXT_ALIGN_LEFT,TEXT_ALIGN_BOTTOM,1,Color(0,0,0,255))
+									draw.RoundedBox(0,_pos.x - 2,_pos.y - 2,4,4,color_black)
+									draw.RoundedBox(0,_pos.x - 1,_pos.y - 1,2,2,color_white)
+									draw.SimpleTextOutlined(_name,"Default",textpos.x,textpos.y,color_white,TEXT_ALIGN_LEFT,TEXT_ALIGN_BOTTOM,1,color_black)
 								end
 								DrawBonePos(ent, id1)
 								if id2 != -1 then
@@ -605,7 +613,7 @@ properties.Add( "keepupright_animprop", {
 		-- This cannot be implemented without a custom constraint.Keepupright function or modification for proper duplicator support.
 		--print( constraint:GetSaveTable().m_worldGoalAxis )
 		--constraint:SetSaveValue( "m_localTestAxis", constraint:GetSaveTable().m_worldGoalAxis ) --ent:GetAngles():Up() )
-		--constraint:SetSaveValue( "m_worldGoalAxis", Vector( 0, 0, 1 ) )
+		--constraint:SetSaveValue( "m_worldGoalAxis", vector_up )
 		--constraint:SetSaveValue( "m_bDampAllRotation", true )
 
 		if ( constraint ) then

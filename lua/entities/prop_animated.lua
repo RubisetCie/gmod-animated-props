@@ -26,9 +26,13 @@ if CLIENT then
 end
 
 local CurTime = CurTime
+local Vector = Vector
+local Angle = Angle
 local timer = timer
 local net = net
 local math = math
+local angle_zero = angle_zero
+local vector_origin = vector_origin
 
 //For ragdollize-on-damage PhysicsCollide damage (physics damage isn't actually implemented on scripted entities or npcs by default, we have to recreate the valve code from scratch)
 local phys_impactforcescale
@@ -220,7 +224,7 @@ if SERVER then
 		if damage <= 0 then return end
 
 		local damageForce = data.OurNewVelocity * data.PhysObject:GetMass() * phys_impactforcescale:GetFloat()
-		if damageForce == Vector(0,0,0) then  //If we're immovable then get the velocity of the object that hit us instead, this sucks bad but it's better than nothing
+		if damageForce == vector_origin then  //If we're immovable then get the velocity of the object that hit us instead, this sucks bad but it's better than nothing
 			damageForce = data.TheirNewVelocity * data.HitObject:GetMass() * phys_impactforcescale:GetFloat()
 		end
 		//if hit by vehicle driven by player, add some upward velocity to force
@@ -1045,7 +1049,7 @@ if SERVER then
 				self:SetLayerPlaybackRate(id, 0)
 				self:SetLayerCycle( id, math.Clamp(self["GetChannel" .. i .. "PauseFrame"](self), startpoint, endpoint) )
 
-				local layersettings = self["GetChannel" .. i .. "LayerSettings"](self) or Vector(0,0,1) //vector; x = layerblendin, y = layerblendout, z = layerweight
+				local layersettings = self["GetChannel" .. i .. "LayerSettings"](self) or vector_up //vector; x = layerblendin, y = layerblendout, z = layerweight
 				self:SetLayerWeight(id, layersettings.z)
 				self:SetLayerBlendIn(id, layersettings.x)
 				self:SetLayerBlendOut(id, layersettings.y)
@@ -1055,7 +1059,7 @@ if SERVER then
 				self:SetLayerPlaybackRate(id, speed / 2)  //gesture/animlayer playback rate is doubled for some reason
 				self:SetLayerCycle(id, startframe)
 
-				local layersettings = self["GetChannel" .. i .. "LayerSettings"](self) or Vector(0,0,1) //vector; x = layerblendin, y = layerblendout, z = layerweight
+				local layersettings = self["GetChannel" .. i .. "LayerSettings"](self) or vector_up //vector; x = layerblendin, y = layerblendout, z = layerweight
 				self:SetLayerWeight(id, layersettings.z)
 				self:SetLayerBlendIn(id, layersettings.x)
 				self:SetLayerBlendOut(id, layersettings.y)
@@ -1232,7 +1236,7 @@ if SERVER then
 				return
 			end
 
-			local min, max = Vector(0,0,0), Vector(0,0,0)
+			local min, max = vector_origin, vector_origin
 			local physmesh = {}
 			local maxverts = 0
 			for convexnum, convextab in pairs (phys:GetMeshConvexes()) do
@@ -2060,8 +2064,8 @@ if CLIENT then
 				local physvel = {}
 				for k, _ in pairs (tab) do
 					physvel[k] = {
-						vel = Vector(0,0,0),
-						angVel = Vector(0,0,0),
+						vel = vector_origin,
+						angVel = vector_origin,
 					}
 				end
 
@@ -2459,10 +2463,10 @@ else
 		//Manipulate non-phys bones
 		if tab2 then
 			for k, v in pairs (tab2) do
-				if v.pos != Vector(0,0,0) then
+				if v.pos != vector_origin then
 					rag:ManipulateBonePosition(k, v.pos)
 				end
-				if v.ang != Angle(0,0,0) then
+				if v.ang != angle_zero then
 					rag:ManipulateBoneAngles(k, v.ang)
 				end
 				if v.scl != Vector(1,1,1) then
@@ -2477,7 +2481,7 @@ else
 				if !IsValid(self) or !IsValid(rag) or IsValid(self:GetParent()) then return end 	//don't move us if we're parented
 				local _, bboxtop1 = rag:GetCollisionBounds()						//move the animprop above the ragdoll, with some height to spare,
 				local bboxtop2, _ = self:GetCollisionBounds()						//using this code copied from the advbonemerge unmerge function -
-				local height = ( Vector(0,0,bboxtop1.z) + Vector(0,0,-bboxtop2.z) ) + Vector(0,0,0)	//position is the center of the ragdoll + the ragdoll's height +
+				local height = ( Vector(0,0,bboxtop1.z) + Vector(0,0,-bboxtop2.z) ) + vector_origin	//position is the center of the ragdoll + the ragdoll's height +
 				self:SetPos(rag:GetPos() + height)							//the animprop's height
 
 				//Also give BuildBonePositions a nudge to prevent cases where the origin manip would keep showing the animprop in its old location
@@ -2608,7 +2612,7 @@ else
 						phys:ApplyForceCenter(self.DoRagdollizeOnDamage.force)
 						self.DoRagdollizeOnDamage.pos = phys:GetPos()
 					end
-					if self.DoRagdollizeOnDamage.pos != Vector(0,0,0) then
+					if self.DoRagdollizeOnDamage.pos != vector_origin then
 						for i = 0, rag:GetPhysicsObjectCount() - 1 do
 							if i != forcebone then
 								local phys = rag:GetPhysicsObjectNum(i)
@@ -2712,7 +2716,7 @@ else
 					// Already have a damage force in the data, use that.
 					local noforce = dmg:IsDamageType(DMG_PARALYZE + DMG_NERVEGAS + DMG_POISON + DMG_RADIATION + DMG_DROWNRECOVER + DMG_ACID + DMG_SLOWBURN //CMultiplayRules::Damage_GetTimeBased (https://github.com/ValveSoftware/source-sdk-2013/blob/master/sp/src/game/shared/multiplay_gamerules.cpp#L156)
 					+ DMG_FALL + DMG_BURN + DMG_PLASMA + DMG_DROWN + DMG_CRUSH + DMG_PHYSGUN + DMG_PREVENT_PHYSICS_FORCE) //CMultiplayRules::Damage_NoPhysicsForce (https://github.com/ValveSoftware/source-sdk-2013/blob/master/sp/src/game/shared/multiplay_gamerules.cpp#L237)
-					if dmg:GetDamageForce() != Vector(0,0,0) or noforce then
+					if dmg:GetDamageForce() != vector_origin or noforce then
 						if dmg:IsDamageType(DMG_BLAST) then
 							// Fudge blast forces a little bit, so that each
 							// victim gets a slightly different trajectory. 
@@ -2780,7 +2784,7 @@ else
 
 				self.DoRagdollizeOnDamage = {
 					["type"] = dmg:GetDamageType(),
-					["force"] = forceVector or Vector(0,0,0),
+					["force"] = forceVector or vector_origin,
 					["pos"] = dmg:GetDamagePosition(),
 					["doforcebone"] = self.LastTraceHit == CurTime(),
 					["attacker"] = dmg:GetAttacker(),
@@ -3538,10 +3542,10 @@ if CLIENT then
 					end
 				end
 				if !newentry["posoffset"] then //note: if we end up using this placeholder table for the root bone, then remapping kind of sucks, but it's better than nothing i guess
-					newentry["posoffset"] = Vector(0,0,0)
-					newentry["angoffset"] = Angle(0,0,0)
-					newentry["pos"] = Vector(0,0,0)
-					newentry["ang"] = Angle(0,0,0)
+					newentry["posoffset"] = vector_origin
+					newentry["angoffset"] = angle_zero
+					newentry["pos"] = vector_origin
+					newentry["ang"] = angle_zero
 				end
 				table.insert(defaultboneoffsets, i, newentry)
 			end
@@ -3741,8 +3745,8 @@ if CLIENT then
 				end
 
 				if !newentry["posoffset"] then
-					newentry["posoffset"] = Vector(0,0,0)
-					newentry["angoffset"] = Angle(0,0,0)
+					newentry["posoffset"] = vector_origin
+					newentry["angoffset"] = angle_zero
 				else
 					newentry["posoffset"]:Div(mdlscl)
 				end

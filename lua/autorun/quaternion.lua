@@ -170,7 +170,7 @@ end
 --
 function QUATERNION:SetDirection(forward, up --[[ Vector(0, 0, 1) ]])
 
-	up = up && up:GetNormalized() || Vector(0, 0, 1);
+	up = up && up:GetNormalized() || vector_up;
 	forward = forward:GetNormalized();
 
 	local m     = Matrix();

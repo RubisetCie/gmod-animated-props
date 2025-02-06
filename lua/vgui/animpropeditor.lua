@@ -3,6 +3,7 @@ AddCSLuaFile()
 local vgui = vgui
 local draw = draw
 local math = math
+local vector_up = vector_up
 
 local PANEL = {}
 
@@ -746,7 +747,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 			//expand if any contained options are non-default
 			cat:SetExpanded(
-				((animent["GetChannel" .. i .. "LayerSettings"](animent) or Vector(0,0,1)) != Vector(0,0,1))
+				((animent["GetChannel" .. i .. "LayerSettings"](animent) or vector_up) != vector_up)
 			)
 			back.LayerOptionsCategory = cat //make this specific category accessible by seekbar code
 
@@ -758,7 +759,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			rpnl:DockMargin(0,-1,0,0) //fix the 1px of blank white space between the header and the contents
 
 				//Squish LayerBlendIn, LayerBlendOut, and LayerWeight into a vector together to save on nwvar floats
-				local layersettings = animent["GetChannel" .. i .. "LayerSettings"](animent) or Vector(0,0,1)
+				local layersettings = animent["GetChannel" .. i .. "LayerSettings"](animent) or vector_up
 
 				local slider = vgui.Create("DNumSlider", rpnl)
 				slider:SetText("Layer Weight")

@@ -131,7 +131,7 @@ duplicator.RegisterEntityClass("animprop_generic_physmodel", function(ply, data)
 			//Fix some old animprops falling through the world because they're nocollided with it using an advballsocket constraint.
 			//constraint.RemoveConstraints won't affect the original constraint for some reason, so instead we need to make an identical one here 
 			//and remove it immediately after, and that'll fix it somehow. Yes, this works.
-			local const = constraint.AdvBallsocket(ouranimprop, game.GetWorld(), 0, 0, ouranimprop:GetPos(), Vector(0,0,0), 0, 0, -180, -180, -180, 180, 180, 180, 0, 0, 0, 1, 1)
+			local const = constraint.AdvBallsocket(ouranimprop, game.GetWorld(), 0, 0, ouranimprop:GetPos(), vector_origin, 0, 0, -180, -180, -180, 180, 180, 180, 0, 0, 0, 1, 1)
 			const:Remove()
 
 			for k, v in pairs (dummy.ConstraintsToMove) do
