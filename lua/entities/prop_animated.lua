@@ -1832,46 +1832,13 @@ if CLIENT then
 			//Can't get model info, so do error handling stuff copied from ragdoll resizer code and then end here
 			GAMEMODE:AddNotify("Can't ragdollize this model - check the console for details", NOTIFY_ERROR, 5)
 			surface.PlaySound("buttons/button11.wav")
-			if IsUselessModel(self:GetModel()) then
-				//util.GetModelInfo will silently fail on models with a bad modelname (http://wiki.garrysmod.com/page/util/GetModelInfo), (example model from bug report: 
-				//https://steamcommunity.com/sharedfiles/filedetails/?id=747597416), so don't ragdollize and instead send the player a notification telling them what the problem is
-				MsgN("RAGDOLLIZE:")
-				MsgN("The model ", self:GetModel(), " couldn't be ragdollized because we can't get its model info due to a bad file name.")
-				MsgN("")
-				MsgN("")
-				MsgN("WHY DID THIS HAPPEN?:")
-				MsgN("")
-				MsgN("The ragdollize feature uses a function called util.GetModelInfo() to get all the info we need about the ragdoll's different physics objects, meaning we can't pose the new ragdoll without it.")
-				MsgN("The problem is, util.GetModelInfo() will FAIL if the model name contains any of the following:")
-				MsgN("_gesture")
-				MsgN("_anim")
-				MsgN( "_gst")
-				MsgN("_pst")
-				MsgN("_shd")
-				MsgN("_ss")
-				MsgN("_posture")
-				MsgN("_anm")
-				MsgN("ghostanim")
-				MsgN("_paths")
-				MsgN("_shared")
-				MsgN("anim_")
-				MsgN("gestures_")
-				MsgN("shared_ragdoll_")
-				MsgN("Usually, model files with these names are \"useless models\" that only exist to store animations for other models, and don't need to be spawned by themselves. They're automatically filtered out of the spawn menu and search bar, so you normally won't run into them.")
-				MsgN("Unfortunately, with the thousands and THOUSANDS of custom models people create for Gmod, someone's bound to make one that has one of these phrases in its name even though it's a totally normal, legitimate model. This means it'll get caught in the \"useless model\" filter anyway and util.GetModelInfo() won't work on it.")
-				MsgN("")
-				MsgN("")
-				MsgN("HOW CAN I FIX IT?:")
-				MsgN("")
-				MsgN("If you created this model, then you'll have to change the name of the file so it doesn't contain any of the phrases above.")
-				MsgN("If you downloaded this model off the workshop, then you'll probably have to ask the creator to fix it. They might not want to, because changing the file name will break any old saves or dupes that were already using the model. Alternatively, if you know what you're doing, you might be able to decompile the addon and change the file name yourself.")
-				MsgN("")
-				MsgN("")
-			else
+			//util.GetModelInfo will silently fail on models with a bad modelname (http://wiki.garrysmod.com/page/util/GetModelInfo), (example model from bug report:
+			//https://steamcommunity.com/sharedfiles/filedetails/?id=747597416), so don't ragdollize and instead send the player a notification telling them what the problem is
+			//if not IsUselessModel(self:GetModel()) then
 				//util.GetModelInfo failed for some other reason, throw a different error
-				MsgN("RAGDOLLIZE:")
-				MsgN("The model \"" .. self:GetModel() .. "\" can't be ragdollized because we can't get its model info for an unknown reason.")
-			end
+				//MsgN("RAGDOLLIZE:")
+				//MsgN("The model \"" .. self:GetModel() .. "\" can't be ragdollized because we can't get its model info for an unknown reason.")
+			//end
 			return
 		end
 
@@ -2064,8 +2031,8 @@ if CLIENT then
 				local physvel = {}
 				for k, _ in pairs (tab) do
 					physvel[k] = {
-						vel = vector_origin,
-						angVel = vector_origin,
+						vel = Vector(0, 0, 0),
+						angVel = Vector(0, 0, 0),
 					}
 				end
 
@@ -2194,8 +2161,8 @@ if CLIENT then
 					physvel[k].vel.z = (tr1.z - tr2.z) * vscl
 
 					//Based off RotationDeltaAxisAngle (https://github.com/ValveSoftware/source-sdk-2013/blob/master/sp/src/mathlib/mathlib_base.cpp#L3532)
-					local srcQuat = Quaternion():SetAngle(oldmatrs[k]:GetAngles())
-					local destQuat = Quaternion():SetAngle(matr:GetAngles())
+					local srcQuat = QuaternionFromAngle(oldmatrs[k]:GetAngles())
+					local destQuat = QuaternionFromAngle(matr:GetAngles())
 					srcQuat:Invert()
 					//srcQuat:MulScalar(-1)
 					destQuat:Mul(srcQuat)
