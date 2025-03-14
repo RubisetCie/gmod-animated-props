@@ -454,6 +454,7 @@ local ConstraintsToPreserve = {
 	["AdvBoneMerge"] = true,
 	["AttachParticleControllerBeam"] = true, //Advanced Particle Controller addon
 	["PartCtrl_Ent"] = true, //ParticleControlOverhaul
+	["PartCtrl_SpecialEffect"] = true, //ParticleControlOverhaul
 	["BoneMerge"] = true, //Bone Merger addon
 	["EasyBonemerge"] = true, //Easy Bonemerge Tool addon
 	["CompositeEntities_Constraint"] = true, //Composite Bonemerge addon

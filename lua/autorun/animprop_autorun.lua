@@ -378,6 +378,7 @@ if SERVER then
 			["AdvBoneMerge"] = true,
 			["AttachParticleControllerBeam"] = true, //Advanced Particle Controller addon
 			["PartCtrl_Ent"] = true, //ParticleControlOverhaul
+			["PartCtrl_SpecialEffect"] = true, //ParticleControlOverhaul
 			//["BoneMerge"] = true, //Bone Merger addon
 			["EasyBonemerge"] = true, //Easy Bonemerge Tool addon
 			["CompositeEntities_Constraint"] = true, //Composite Bonemerge addon
@@ -391,11 +392,15 @@ if SERVER then
 						if val == oldent then 
 							const[key] = prop 
 						//Transfer over bonemerged ents from other addons' bonemerge constraints, and make sure they don't get DeleteOnRemoved
-						elseif (const.Type == "EasyBonemerge" or const.Type == "CompositeEntities_Constraint" or const.Type == "PartCtrl_Ent") //doesn't work for BoneMerge, bah
+						elseif (const.Type == "EasyBonemerge" or const.Type == "CompositeEntities_Constraint" 
+						or const.Type == "PartCtrl_Ent" or const.Type == "PartCtrl_SpecialEffect") //doesn't work for BoneMerge, bah
 						and isentity(val) and IsValid(val) and val:GetParent() == oldent then
-							//MsgN("reparenting ", val:GetModel())
+							//MsgN("reparenting ", val:GetModel(), " ", val, " to ", prop)
 							if const.Type == "CompositeEntities_Constraint" then
 								val:SetParent(prop)
+							--[[elseif const.Type == "PartCtrl_SpecialEffect" then //seems to be redundant here but not in advbonemerge, not sure why
+								val:SetParent(prop)
+								val:SetSpecialEffectParent(prop)]]
 							end
 							oldent:DontDeleteOnRemove(val)
 						end
@@ -413,14 +418,16 @@ if SERVER then
 						entstab[const.Entity[tabnum].Index] = const.Entity[tabnum].Entity
 					end
 
-					if const.Type == "PartCtrl_Ent" and IsValid(const.Ent1) then
+					if const.Type == "PartCtrl_Ent" --[[or const.Type == "PartCtrl_SpecialEffect"]] and IsValid(const.Ent1) then //again, PartCtrl_SpecialEffect handling doesn't seem to be necessary here for some reason
 						oldent:DontDeleteOnRemove(const.Ent1) //Make sure we also clear deleteonremove for unparented cpoints
-						//Tell clients to retrieve the updated info table (the constraint func will change the relevant value to point to our ent)
-						timer.Simple(0.1, function() //do this on a timer, otherwise the advbonemerge ent might not exist on the client yet when they receive the new table
-							net.Start("PartCtrl_InfoTableUpdate_SendToCl")
-								net.WriteEntity(const.Ent1)
-							net.Broadcast()
-						end)
+						//if const.Type == "PartCtrl_Ent" then
+							//Tell clients to retrieve the updated info table (the constraint func will change the relevant value to point to our ent)
+							timer.Simple(0.1, function() //do this on a timer, otherwise the advbonemerge ent might not exist on the client yet when they receive the new table
+								net.Start("PartCtrl_InfoTableUpdate_SendToCl")
+									net.WriteEntity(const.Ent1)
+								net.Broadcast()
+							end)
+						//end
 					end
 
 					//Now copy the constraint over to the prop
