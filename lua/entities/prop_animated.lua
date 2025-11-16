@@ -417,7 +417,7 @@ function ENT:Initialize()
 	else
 
 		self.GripMaterial = Material("sprites/grip")
-		//self.GripMaterialHover = Material("sprites/grip_hover")
+		self.GripMaterialHover = Material("sprites/grip_hover")
 
 		self:SetLOD(0)
 		self:SetupBones()
@@ -435,14 +435,6 @@ function ENT:Initialize()
 		self.RagdollizeDoManips = true //store these as clientside vars, don't bother networking or saving them to dupes, it's not important
 		self.RagdollizeUseRagdollResizer = tobool(duplicator.FindEntityClass("prop_resizedragdoll_physparent"))
 
-	end
-
-	//this makes clientside traces like properties work anywhere you click on a hitbox, instead of requiring an overlap of both the collision bounds and hitboxes. 
-	//this is a lot better in most cases because it fixes the editor window being hard to open for some models and most effects. doesn't effect toolgun or physgun.
-	//this has a bad interaction with effects where the ring turns blue if we look at any hitbox, when it's supposed to only turn blue when the physgun can grab it,
-	//so that feature has been disabled because the properties upside is a lot more important.
-	if self:GetHitBoxCount(0) > 0 and self:GetBoneName(0) != "static_prop" then //don't let this run if the model has 0 hitboxes, or it'll break everything on clients; also don't run it on static props, because it either doesn't do anything or actually breaks physgun hit detection like on HL2 bridges (note that SetSurroundingBounds doesn't work on them either)
-		self:SetSurroundingBoundsType(BOUNDS_HITBOXES)
 	end
 
 end
@@ -730,6 +722,11 @@ function ENT:Think()
 		//Note: Animated props don't use a workaround for static_prop models. Instead, unmerged static_prop animprops use garrymanips for scaling (the manipulatebonescale override
 		//has an exception for them) and merged static_prop animprops are automatically converted to ent_advbonemerge since they don't have any animations.
 
+		//test: draw surrounding bounds
+		--[[local min, max = self:GetSurroundingBounds()
+		//MsgN(min, ", ", max)
+		debugoverlay.BoxAngles(Vector(), min, max, Angle(), 0.05, Color(0,255,150,0))]]
+
 		//(Advanced Bonemerge) Set the render bounds (TODO: advbone checks to make sure the BuildBonePositions func isn't "asleep" before doing this, to prevent running this unnecessarily, but it might be more complicated for animprops)
 		if !self.IsPuppeteer and self.AdvBone_RenderBounds_BoneMins and self.AdvBone_RenderBounds_HighestBoneScale then
 			local bloat = nil
@@ -758,9 +755,14 @@ function ENT:Think()
 			if IsValid(parent) then
 				//TODO: this doesn't set the size of the shadow properly unless we set EF_BONEMERGE on the merged ent, but doing that applies the
 				//default bonemerge effect to the model and squashes the animation on any matching bones, so we can't do that
-				parent:UpdateShadow()
+				//if !parent:IsEffectActive(EF_NOSHADOW) then
+					parent:UpdateShadow()
+				//end
 			else
-				self:UpdateShadow()
+				//MsgN(self:GetEffects())
+				//if !self:IsEffectActive(EF_NOSHADOW) then
+					self:UpdateShadow()
+				//end
 			end
 		end
 
@@ -1419,6 +1421,24 @@ if SERVER then
 					ply:AddCleanup("constraints", constraint)
 				end
 				//self:SetNWBool("IsUpright", true) //this is almost certainly already true, so we can safely omit this so as to not spam net msgs when player scrubs the scale slider; worst case, the keep upright property gets out of sync, which isn't a big deal
+			end
+		end
+		
+		//Increase the size of the surrounding bounds (area that you can click on the model with clientside traces, like properties) to be larger 
+		//than the collision bounds if necessary. This fixes the editor window being too hard to open for some models and almost all effects. 
+		//BUG: We were using BOUNDS_HITBOXES prior to this; this solution is a lot more complicated and could potentially fail in edge cases where 
+		//the model gets moved really far out of the bounds, but that setting has a major bug that can make it much harder to grab the prop with 
+		//the physgun again after moving it, and also has a minor bug that breaks attached particles (https://github.com/Facepunch/garrysmod-issues/issues/6028). 
+		//Neither of these issues are present with BOUNDS_COLLISION or SetSurroundingBounds. Revert this if the issues are ever fixed!
+		if self:GetHitBoxCount(0) > 0 then //don't let this run if the model has 0 hitboxes, or it'll break traces entirely
+			local max = 1000 //can't make this larger or it causes frame drops
+			local mins, maxs = self:GetCollisionBounds()
+			local max2 = math.max(-mins.x, -mins.y, -mins.z, maxs.x, maxs.y, maxs.z)
+			if max > max2 then
+				local big = Vector(max, max, max) / scale
+				self:SetSurroundingBounds(-big, big) 
+			else
+				self:SetSurroundingBoundsType(BOUNDS_COLLISION) //default behavior
 			end
 		end
 
@@ -3005,16 +3025,20 @@ if CLIENT then
 		end
 		if !self.IsPuppeteer and GetTopmostParentPlayer(self) then
 			shoulddraw = LocalPlayer():ShouldDrawLocalPlayer()
-			if !shoulddraw then
-				if !self.RemovedLocalplayerShadow then
-					self.RemovedLocalplayerShadow = true
-					self:DestroyShadow()
+			//if !self:IsEffectActive(EF_NOSHADOW) then
+				if !shoulddraw then
+					if !self.RemovedLocalplayerShadow then
+						self.RemovedLocalplayerShadow = true
+						self:DestroyShadow()
+					end
+					return
+				elseif shoulddraw and self.RemovedLocalplayerShadow then
+					self.RemovedLocalplayerShadow = nil
+					//if !self:IsEffectActive(EF_NOSHADOW) then
+						self:CreateShadow()
+					//end
 				end
-				return
-			elseif shoulddraw and self.RemovedLocalplayerShadow then
-				self.RemovedLocalplayerShadow = nil
-				self:CreateShadow()
-			end
+			//end
 		end
 
 
@@ -3058,13 +3082,12 @@ if CLIENT then
 				if GetConVarNumber("cl_draweffectrings") == 0 then return end
 
 				local size = math.Clamp(1 + ((self:GetModelScale() - 1) * 0.5), 1, 50) //effect grip scales up half as fast as the prop itself
-				//if self:BeingLookedAtByLocalPlayer() then
-				//	render.SetMaterial(self.GripMaterialHover) //commented this out because it has a bad interaction with ent.SetSurroundingBoundsType (see comment in Initialize func)
-				//else
+				local mins, maxs = self:GetCollisionBounds()
+				if self:BoxBeingLookedAt(mins, maxs) then
+					render.SetMaterial(self.GripMaterialHover)
+				else
 					render.SetMaterial(self.GripMaterial)
-				//end
-				local _, maxs = self:GetCollisionBounds()
-				
+				end
 				render.DrawSprite(self:GetPos() + (self:GetUp() * (maxs.z / 2)), 16 * size, 16 * size, color_white)
 			elseif mode == 1 then
 				//Draw physics box
@@ -3073,6 +3096,38 @@ if CLIENT then
 				local mins, maxs = self:GetCollisionBounds()
 				render.DrawWireframeBox(self:GetPos(), self:GetAngles(), mins, maxs, color_white, true)
 			end
+		end
+		
+	end
+
+	function ENT:BoxBeingLookedAt(mins, maxs) //modified from ENT:BeingLookedAtByLocalPlayer() (https://github.com/Facepunch/garrysmod/blob/master/garrysmod/gamemodes/sandbox/entities/entities/base_gmodentity.lua#L10)
+		
+		local ply = LocalPlayer()
+		if !IsValid(ply) then return false end
+
+		local view = ply:GetViewEntity()
+		local dist = self.MaxWorldTipDistance
+		dist = dist * dist
+
+		local pos, fwd
+		if view:IsPlayer() then
+			//If we're spectating a player, perform an eye trace
+			pos = view:EyePos()
+			fwd = view:GetAimVector()
+		else
+			//If we're not spectating a player, perform a manual trace from the entity's position
+			pos = view:GetPos()
+			fwd = view:GetAngles():Forward()
+		end
+
+		if pos:DistToSqr(self:GetPos()) <= dist then
+			local tr1 = util.TraceLine({
+				start = pos,
+				endpos = pos + (fwd * dist),
+				filter = {view, self}
+			})
+			local tr2_hit, _, tr2_frac = util.IntersectRayWithOBB(pos, fwd * dist, self:GetPos(), self:GetAngles(), mins, maxs)
+			return tr2_hit and tr2_frac < tr1.Fraction //if the trace hits the prop's collision box BEFORE it hits another entity, then we're good!
 		end
 		
 	end
