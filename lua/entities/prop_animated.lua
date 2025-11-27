@@ -437,6 +437,15 @@ function ENT:Initialize()
 
 	end
 
+	//NOTE: This was disabled due to bugs (see ), but is included for reference in case the bugs are fixed
+	--[[//this makes clientside traces like properties work anywhere you click on a hitbox, instead of requiring an overlap of both the collision bounds and hitboxes. 
+	//this is a lot better in most cases because it fixes the editor window being hard to open for some models and most effects. doesn't effect toolgun or physgun.
+	//this has a bad interaction with effects where the ring turns blue if we look at any hitbox, when it's supposed to only turn blue when the physgun can grab it,
+	//so that feature has been disabled because the properties upside is a lot more important.
+	if self:GetHitBoxCount(0) > 0 and self:GetBoneName(0) != "static_prop" then //don't let this run if the model has 0 hitboxes, or it'll break everything on clients; also don't run it on static props, because it either doesn't do anything or actually breaks physgun hit detection like on HL2 bridges (note that SetSurroundingBounds doesn't work on them either)
+		self:SetSurroundingBoundsType(BOUNDS_HITBOXES)
+	end]]
+
 end
 
 
@@ -947,6 +956,7 @@ function ENT:Think()
 		//have happened this frame.
 		//This also fixes a problem with ControlMovementPoseParams, where BuildBonePositions would run before this func had a chance to update the pose params, and THEN it would do yet ANOTHER 
 		//iteration of BulldBonePositions this frame when ControlMovementPoseParams called InvalidateBoneCache, and yeah okay no we don't have to worry about any of this any more.
+		self.LastBuildBonePositionsTime = 0
 		self.DoBuildBonePositions = time
 		self:InvalidateBoneCache()
 
@@ -1428,9 +1438,10 @@ if SERVER then
 		//than the collision bounds if necessary. This fixes the editor window being too hard to open for some models and almost all effects. 
 		//BUG: We were using BOUNDS_HITBOXES prior to this; this solution is a lot more complicated and could potentially fail in edge cases where 
 		//the model gets moved really far out of the bounds, but that setting has a major bug that can make it much harder to grab the prop with 
-		//the physgun again after moving it, and also has a minor bug that breaks attached particles (https://github.com/Facepunch/garrysmod-issues/issues/6028). 
-		//Neither of these issues are present with BOUNDS_COLLISION or SetSurroundingBounds. Revert this if the issues are ever fixed!
-		if self:GetHitBoxCount(0) > 0 then //don't let this run if the model has 0 hitboxes, or it'll break traces entirely
+		//the physgun again after moving it (only seems to happen if the prop was spawned with the duplicator?), and also has a minor bug that 
+		//breaks attached particles (https://github.com/Facepunch/garrysmod-issues/issues/6028). Neither of these issues are present with 
+		//BOUNDS_COLLISION or SetSurroundingBounds. Revert this if the issues are ever fixed!
+		--[[if self:GetHitBoxCount(0) > 0 then //don't let this run if the model has 0 hitboxes, or it'll break traces entirely
 			local max = 1000 //can't make this larger or it causes frame drops
 			local mins, maxs = self:GetCollisionBounds()
 			local max2 = math.max(-mins.x, -mins.y, -mins.z, maxs.x, maxs.y, maxs.z)
@@ -1440,7 +1451,7 @@ if SERVER then
 			else
 				self:SetSurroundingBoundsType(BOUNDS_COLLISION) //default behavior
 			end
-		end
+		end]]
 
 	end
 
@@ -3705,7 +3716,7 @@ if CLIENT then
 		if !IsValid(self) then return end
 		//self.BuildBonePositions_HasRun = true //Newly connected players will add this callback, but then wipe it; this tells the think func that it actually went through
 		local curtime = CurTime()
-		if self.DoBuildBonePositions < curtime then return end //don't run this func this frame until our think func lets us, otherwise bad stuff can happen (see think func comment)
+		//if self.DoBuildBonePositions < curtime then return end //don't run this func this frame until our think func lets us, otherwise bad stuff can happen (see think func comment)
 
 		//Handle in-code tf2 minigun animation, even if we don't want to do all the expensive advbonemerge stuff
 		if self.MinigunAnimBone then
