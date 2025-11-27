@@ -437,7 +437,7 @@ function ENT:Initialize()
 
 	end
 
-	//NOTE: This was disabled due to bugs (see Think func), but is included for reference in case the bugs are fixed
+	//BUG: This was disabled due to technical problems (see Think func), but is included for reference in case the bugs are fixed.
 	--[[//this makes clientside traces like properties work anywhere you click on a hitbox, instead of requiring an overlap of both the collision bounds and hitboxes. 
 	//this is a lot better in most cases because it fixes the editor window being hard to open for some models and most effects. doesn't effect toolgun or physgun.
 	if self:GetHitBoxCount(0) > 0 and self:GetBoneName(0) != "static_prop" then //don't let this run if the model has 0 hitboxes, or it'll break everything on clients; also don't run it on static props, because it either doesn't do anything or actually breaks physgun hit detection like on HL2 bridges (note that SetSurroundingBounds doesn't work on them either)
@@ -706,7 +706,7 @@ function ENT:Think()
 
 
 		//Set the surrounding bounds (area where you can click on the model with traces, like properties) to be larger than the collision bounds 
-		//if necessary. This fixes the editor window being too hard to open for some models and almost all effects. 
+		//if necessary. This fixes the editor window being too hard to open for some models (i.e. viewmodels) and almost all effects. 
 		//BUG: We were using BOUNDS_HITBOXES prior to this, but that setting is buggy and causes a number of problems, such as breaking attached
 		//particles (https://github.com/Facepunch/garrysmod-issues/issues/6028). This solution is less elegant and won't work in cases where
 		//models get bonemanipped out of bounds, but we're limited in what we can do here since this needs to be called serverside to function
