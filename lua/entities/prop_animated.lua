@@ -664,6 +664,49 @@ function ENT:Think()
 		end
 
 
+		//Control movement pose parameters
+		local sequence = self:GetChannel1Sequence()
+		local playbackrate = self:GetChannel1Speed()
+
+		if self:GetControlMovementPoseParams() then
+
+			//First set all the pose params to 0, because otherwise GetSequenceGroundSpeed returns the wrong number
+			self:SetPoseParameter("move_x", 0)
+			self:SetPoseParameter("move_y", 0)
+			self:SetPoseParameter("move_yaw", 0)
+			self:SetPoseParameter("move_scale", 0)
+
+			local speed = self:GetSequenceGroundSpeed(sequence)
+			if speed == 0 then
+				speed = 300  //totally arbitrary fallback value
+			end
+			speed = Vector(speed,speed,speed)
+			speed = speed * playbackrate * self:GetModelScale() * self:GetManipulateBoneScale(-1)
+			//make sure we don't divide the velocity by 0
+			if speed.x == 0 then speed.x = 1 end
+			if speed.y == 0 then speed.y = 1 end
+			if speed.z == 0 then speed.z = 1 end
+
+			local vel = nil
+			if IsValid(self:GetParent()) then
+				vel = self:GetParent():GetVelocity()
+			else
+				vel = self:GetVelocity()
+			end
+			local ang = self:GetAngles()
+			local localvel = Vector( vel:Dot(ang:Forward()) / speed.x, -vel:Dot(ang:Right()) / speed.y, vel:Dot(ang:Up()) / speed.z )
+			local localvel_angle = localvel:Angle()
+			localvel_angle:Normalize()
+
+			//Now apply the correct pose params
+			self:SetPoseParameter("move_x", localvel.x)
+			self:SetPoseParameter("move_y", -localvel.y)
+			self:SetPoseParameter("move_yaw", localvel_angle.y)
+			self:SetPoseParameter("move_scale", math.abs(localvel.x) + math.abs(localvel.y))
+
+		end
+
+
 		self:NextThink(time)
 		return true
 
@@ -850,48 +893,6 @@ function ENT:Think()
 		end
 
 
-		//Control movement pose parameters
-		local sequence = self:GetChannel1Sequence()
-		local playbackrate = self:GetChannel1Speed()
-
-		if self:GetControlMovementPoseParams() then
-
-			local speed = self:GetSequenceGroundSpeed(sequence)
-			if speed == 0 then
-				speed = 300  //totally arbitrary fallback value
-			end
-			speed = Vector(speed,speed,speed)
-			local scale = self:GetModelScale()
-			if self.AdvBone_OriginMatrix then scale = self.AdvBone_OriginMatrix:GetScale() end
-			speed = speed * playbackrate * scale
-			//make sure we don't divide the velocity by 0
-			if speed.x == 0 then speed.x = 1 end
-			if speed.y == 0 then speed.y = 1 end
-			if speed.z == 0 then speed.z = 1 end
-
-			local vel = nil
-			if IsValid(self:GetParent()) then
-				vel = self:GetParent():GetVelocity()
-			else
-				vel = self:GetVelocity()
-			end
-			local ang = self:GetAngles()
-			local localvel = Vector( vel:Dot(ang:Forward()) / speed.x, -vel:Dot(ang:Right()) / speed.y, vel:Dot(ang:Up()) / speed.z )
-			local localvel_angle = localvel:Angle()
-			localvel_angle:Normalize()
-
-			self:SetPoseParameter("move_x", localvel.x)
-			self:SetPoseParameter("move_y", -localvel.y)
-
-			self:SetPoseParameter("move_yaw", localvel_angle.y)
-
-			self:SetPoseParameter("move_scale", math.abs(localvel.x) + math.abs(localvel.y))
-
-			//self:InvalidateBoneCache() //don't do this yet, we do InvalidateBoneCache at the end of this function
-
-		end
-
-
 		//Control in-code TF2 minigun animation
 		if self.MinigunAnimBone and self.MinigunAnimFrame != time then
 			//Don't do this more than once per frame or else it'll mess up
@@ -945,20 +946,6 @@ function ENT:Think()
 				end
 			end
 		end
-
-		//(AdvBone/Remapping) Don't run our BuildBonePositions function this frame until after we've run UpdateShadow and done ControlMovementPoseParams first.
-		//This fixes a problem caused by running UpdateShadow in this func, where it would make BuildBonePositions run an extra time per frame, but that would somehow make the FIRST iteration 
-		//this frame have bad choppy-looking movement if the entity's position was changing, so we'd have to detect that first iteration and stop it from running, so that it wouldn't cache the 
-		//bad bone positions in self.SavedBoneMatrices and make the entity look like garbage if it's moving around. The problem is, this bug only happens depending on a bunch of totally 
-		//arbitrary conditions - it only happens if the animprop is unparented, it won't happen if you're driving a vehicle or entity, it won't happen if you're noclipping and also have a fire
-		//key held down or a menu open, and also it changes even more if the entity has eyes or not? We tried predicting all this in BuildBonePositions before, but it was a huge pain and didn't 
-		//even work all that well, so instead we have this super simple solution here - just do an extra iteration here that we KNOW is good, and ignore any prior iterations that may or may not 
-		//have happened this frame.
-		//This also fixes a problem with ControlMovementPoseParams, where BuildBonePositions would run before this func had a chance to update the pose params, and THEN it would do yet ANOTHER 
-		//iteration of BulldBonePositions this frame when ControlMovementPoseParams called InvalidateBoneCache, and yeah okay no we don't have to worry about any of this any more.
-		self.LastBuildBonePositionsTime = 0
-		self.DoBuildBonePositions = time
-		self:InvalidateBoneCache()
 
 	end
 
@@ -1913,7 +1900,6 @@ if CLIENT then
 
 		local time = CurTime()
 		self.LastBuildBonePositionsTime = 0
-		self.DoBuildBonePositions = time
 		self:DrawModel()
 		self:SetupBones()
 
@@ -2035,7 +2021,6 @@ if CLIENT then
 						self:ManipulateBoneScale(i, Vector(1,1,1))
 					end
 					self.LastBuildBonePositionsTime = 0
-					self.DoBuildBonePositions = time
 					self:InvalidateBoneCache()
 					self:DrawModel()
 					self:SetupBones()
@@ -2092,7 +2077,6 @@ if CLIENT then
 						end
 					end
 					self.LastBuildBonePositionsTime = 0
-					self.DoBuildBonePositions = time
 					self:InvalidateBoneCache()
 					self:DrawModel()
 					self:SetupBones()
@@ -2121,7 +2105,6 @@ if CLIENT then
 						self:ManipulateBoneScale(i, scales[i])
 					end
 					self.LastBuildBonePositionsTime = 0
-					self.DoBuildBonePositions = time
 					self:InvalidateBoneCache()
 					self:DrawModel()
 					self:SetupBones()
@@ -2249,13 +2232,11 @@ if CLIENT then
 				//Get the rewound bone positions
 				if animent != self then
 					animent.LastBuildBonePositionsTime = 0
-					animent.DoBuildBonePositions = time
 					animent:InvalidateBoneCache()
 					animent:DrawModel()
 					animent:SetupBones()
 				end
 				self.LastBuildBonePositionsTime = 0
-				self.DoBuildBonePositions = time
 				self:InvalidateBoneCache()
 				self:DrawModel()
 				self:SetupBones()
@@ -2279,13 +2260,11 @@ if CLIENT then
 				end
 				if animent != self then
 					animent.LastBuildBonePositionsTime = 0
-					animent.DoBuildBonePositions = time
 					animent:InvalidateBoneCache()
 					animent:DrawModel()
 					animent:SetupBones()
 				end
 				self.LastBuildBonePositionsTime = 0
-				self.DoBuildBonePositions = time
 				self:InvalidateBoneCache()
 				self:DrawModel()
 				self:SetupBones()
@@ -3706,7 +3685,6 @@ if CLIENT then
 		self.SavedBoneMatrices = {}
 		self.SavedLocalBonePositions = {}
 		self.LastBoneChangeTime = CurTime()
-		self.DoBuildBonePositions = 0
 
 		self:AddCallback("BuildBonePositions", self.BuildBonePositions)
 
@@ -3716,7 +3694,6 @@ if CLIENT then
 		if !IsValid(self) then return end
 		//self.BuildBonePositions_HasRun = true //Newly connected players will add this callback, but then wipe it; this tells the think func that it actually went through
 		local curtime = CurTime()
-		//if self.DoBuildBonePositions < curtime then return end //don't run this func this frame until our think func lets us, otherwise bad stuff can happen (see think func comment)
 
 		//Handle in-code tf2 minigun animation, even if we don't want to do all the expensive advbonemerge stuff
 		if self.MinigunAnimBone then
