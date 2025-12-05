@@ -419,7 +419,7 @@ function ENT:Initialize()
 	else
 
 		self.GripMaterial = Material("sprites/grip")
-		//self.GripMaterialHover = Material("sprites/grip_hover")
+		self.GripMaterialHover = Material("sprites/grip_hover")
 
 		self:SetLOD(0)
 		self:SetupBones()
@@ -439,13 +439,12 @@ function ENT:Initialize()
 
 	end
 
-	//this makes clientside traces like properties work anywhere you click on a hitbox, instead of requiring an overlap of both the collision bounds and hitboxes. 
+	//BUG: This was disabled due to technical problems (see Think func), but is included for reference in case the bugs are fixed.
+	--[[//this makes clientside traces like properties work anywhere you click on a hitbox, instead of requiring an overlap of both the collision bounds and hitboxes. 
 	//this is a lot better in most cases because it fixes the editor window being hard to open for some models and most effects. doesn't effect toolgun or physgun.
-	//this has a bad interaction with effects where the ring turns blue if we look at any hitbox, when it's supposed to only turn blue when the physgun can grab it,
-	//so that feature has been disabled because the properties upside is a lot more important.
 	if self:GetHitBoxCount(0) > 0 and self:GetBoneName(0) != "static_prop" then //don't let this run if the model has 0 hitboxes, or it'll break everything on clients; also don't run it on static props, because it either doesn't do anything or actually breaks physgun hit detection like on HL2 bridges (note that SetSurroundingBounds doesn't work on them either)
 		self:SetSurroundingBoundsType(BOUNDS_HITBOXES)
-	end
+	end]]
 
 end
 
@@ -653,6 +652,75 @@ function ENT:Think()
 			self.DoRagdollizeOnDamage = nil
 		end
 
+		//Control movement pose parameters
+		local sequence = self:GetChannel1Sequence()
+		local playbackrate = self:GetChannel1Speed()
+
+		if self:GetControlMovementPoseParams() then
+
+			//First set all the pose params to 0, because otherwise GetSequenceGroundSpeed returns the wrong number
+			self:SetPoseParameter("move_x", 0)
+			self:SetPoseParameter("move_y", 0)
+			self:SetPoseParameter("move_yaw", 0)
+			self:SetPoseParameter("move_scale", 0)
+
+			local speed = self:GetSequenceGroundSpeed(sequence)
+			if speed == 0 then
+				speed = 300  //totally arbitrary fallback value
+			end
+			speed = Vector(speed,speed,speed)
+			speed = speed * playbackrate * self:GetModelScale() * self:GetManipulateBoneScale(-1)
+			//make sure we don't divide the velocity by 0
+			if speed.x == 0 then speed.x = 1 end
+			if speed.y == 0 then speed.y = 1 end
+			if speed.z == 0 then speed.z = 1 end
+
+			local vel = nil
+			if IsValid(self:GetParent()) then
+				vel = self:GetParent():GetVelocity()
+			else
+				vel = self:GetVelocity()
+			end
+			local ang = self:GetAngles()
+			local localvel = Vector( vel:Dot(ang:Forward()) / speed.x, -vel:Dot(ang:Right()) / speed.y, vel:Dot(ang:Up()) / speed.z )
+			local localvel_angle = localvel:Angle()
+			localvel_angle:Normalize()
+
+			//Now apply the correct pose params
+			self:SetPoseParameter("move_x", localvel.x)
+			self:SetPoseParameter("move_y", -localvel.y)
+			self:SetPoseParameter("move_yaw", localvel_angle.y)
+			self:SetPoseParameter("move_scale", math.abs(localvel.x) + math.abs(localvel.y))
+
+		end
+
+
+		//Set the surrounding bounds (area where you can click on the model with traces, like properties) to be larger than the collision bounds 
+		//if necessary. This fixes the editor window being too hard to open for some models (i.e. viewmodels) and almost all effects. 
+		//BUG: We were using BOUNDS_HITBOXES prior to this, but that setting is buggy and causes a number of problems, such as breaking attached
+		//particles (https://github.com/Facepunch/garrysmod-issues/issues/6028). This solution is less elegant and won't work in cases where
+		//models get bonemanipped out of bounds, but we're limited in what we can do here since this needs to be called serverside to function
+		//(no using the bone bounds from BuildBonePositions, sadly) Revert this if the issues with BOUNDS_HITBOXES are ever fixed!
+		if self:GetHitBoxCount(0) > 0 then
+			local tab = self:GetSequenceInfo(self:GetChannel1Sequence(self))
+			local min, max
+			if tab then
+				min = tab.bbmin
+				max = tab.bbmax
+			end
+			if min and max then
+				min, max = self:GetRotatedAABB(tab.bbmin, tab.bbmax)
+				local min2, max2 = self:GetRotatedAABB(self:GetCollisionBounds())
+				self:SetSurroundingBounds(
+					Vector(math.min(min.x,min2.x), math.min(min.y,min2.y), math.min(min.z,min2.z)), 
+					Vector(math.max(max.x,max2.x), math.max(max.y,max2.y), math.max(max.z,max2.z))
+				)
+			else
+				self:SetSurroundingBounds(self:GetRotatedAABB(self:GetCollisionBounds()))
+			end
+		end
+
+
 		self:NextThink(time)
 		return true
 
@@ -718,6 +786,11 @@ function ENT:Think()
 		//Note: Animated props don't use a workaround for static_prop models. Instead, unmerged static_prop animprops use garrymanips for scaling (the manipulatebonescale override
 		//has an exception for them) and merged static_prop animprops are automatically converted to ent_advbonemerge since they don't have any animations.
 
+		//test: draw surrounding bounds
+		--[[local min, max = self:GetSurroundingBounds()
+		//MsgN(min, ", ", max)
+		debugoverlay.BoxAngles(Vector(), min, max, Angle(), 0.05, Color(0,255,150,0))]]
+
 		//(Advanced Bonemerge) Set the render bounds (TODO: advbone checks to make sure the BuildBonePositions func isn't "asleep" before doing this, to prevent running this unnecessarily, but it might be more complicated for animprops)
 		if !self.IsPuppeteer and self.AdvBone_RenderBounds_BoneMins and self.AdvBone_RenderBounds_HighestBoneScale then
 			local bloat = nil
@@ -746,9 +819,14 @@ function ENT:Think()
 			if IsValid(parent) then
 				//TODO: this doesn't set the size of the shadow properly unless we set EF_BONEMERGE on the merged ent, but doing that applies the
 				//default bonemerge effect to the model and squashes the animation on any matching bones, so we can't do that
-				parent:UpdateShadow()
+				//if !parent:IsEffectActive(EF_NOSHADOW) then
+					parent:UpdateShadow()
+				//end
 			else
-				self:UpdateShadow()
+				//MsgN(self:GetEffects())
+				//if !self:IsEffectActive(EF_NOSHADOW) then
+					self:UpdateShadow()
+				//end
 			end
 		end
 
@@ -825,47 +903,6 @@ function ENT:Think()
 		end
 
 
-		//Control movement pose parameters
-		local sequence = self:GetChannel1Sequence()
-		local playbackrate = self:GetChannel1Speed()
-
-		if self:GetControlMovementPoseParams() then
-
-			local speed = self:GetSequenceGroundSpeed(sequence)
-			if speed == 0 then
-				speed = 300  //totally arbitrary fallback value
-			end
-			speed = Vector(speed,speed,speed)
-			local scale = self:GetModelScale()
-			if self.AdvBone_OriginMatrix then scale = self.AdvBone_OriginMatrix:GetScale() end
-			speed = speed * playbackrate * scale
-			//make sure we don't divide the velocity by 0
-			if speed.x == 0 then speed.x = 1 end
-			if speed.y == 0 then speed.y = 1 end
-			if speed.z == 0 then speed.z = 1 end
-
-			local vel = nil
-			if IsValid(self:GetParent()) then
-				vel = self:GetParent():GetVelocity()
-			else
-				vel = self:GetVelocity()
-			end
-			local ang = self:GetAngles()
-			local localvel = Vector( vel:Dot(ang:Forward()) / speed.x, -vel:Dot(ang:Right()) / speed.y, vel:Dot(ang:Up()) / speed.z )
-			local localvel_angle = localvel:Angle()
-			localvel_angle:Normalize()
-
-			self:SetPoseParameter("move_x", localvel.x)
-			self:SetPoseParameter("move_y", -localvel.y)
-
-			self:SetPoseParameter("move_yaw", localvel_angle.y)
-
-			self:SetPoseParameter("move_scale", math.abs(localvel.x) + math.abs(localvel.y))
-
-			//self:InvalidateBoneCache() //don't do this yet, we do InvalidateBoneCache at the end of this function
-
-		end
-
 		//Control in-code TF2 minigun animation
 		if self.MinigunAnimBone and self.MinigunAnimFrame != time then
 			//Don't do this more than once per frame or else it'll mess up
@@ -919,19 +956,6 @@ function ENT:Think()
 				end
 			end
 		end
-
-		//(AdvBone/Remapping) Don't run our BuildBonePositions function this frame until after we've run UpdateShadow and done ControlMovementPoseParams first.
-		//This fixes a problem caused by running UpdateShadow in this func, where it would make BuildBonePositions run an extra time per frame, but that would somehow make the FIRST iteration 
-		//this frame have bad choppy-looking movement if the entity's position was changing, so we'd have to detect that first iteration and stop it from running, so that it wouldn't cache the 
-		//bad bone positions in self.SavedBoneMatrices and make the entity look like garbage if it's moving around. The problem is, this bug only happens depending on a bunch of totally 
-		//arbitrary conditions - it only happens if the animprop is unparented, it won't happen if you're driving a vehicle or entity, it won't happen if you're noclipping and also have a fire
-		//key held down or a menu open, and also it changes even more if the entity has eyes or not? We tried predicting all this in BuildBonePositions before, but it was a huge pain and didn't 
-		//even work all that well, so instead we have this super simple solution here - just do an extra iteration here that we KNOW is good, and ignore any prior iterations that may or may not 
-		//have happened this frame.
-		//This also fixes a problem with ControlMovementPoseParams, where BuildBonePositions would run before this func had a chance to update the pose params, and THEN it would do yet ANOTHER 
-		//iteration of BulldBonePositions this frame when ControlMovementPoseParams called InvalidateBoneCache, and yeah okay no we don't have to worry about any of this any more.
-		self.DoBuildBonePositions = time
-		self:InvalidateBoneCache()
 
 	end
 
@@ -1796,7 +1820,6 @@ if CLIENT then
 
 		local time = CurTime()
 		self.LastBuildBonePositionsTime = 0
-		self.DoBuildBonePositions = time
 		self:DrawModel()
 		self:SetupBones()
 
@@ -1885,7 +1908,6 @@ if CLIENT then
 						self:ManipulateBoneScale(i, Vector(1,1,1))
 					end
 					self.LastBuildBonePositionsTime = 0
-					self.DoBuildBonePositions = time
 					self:InvalidateBoneCache()
 					self:DrawModel()
 					self:SetupBones()
@@ -1942,7 +1964,6 @@ if CLIENT then
 						end
 					end
 					self.LastBuildBonePositionsTime = 0
-					self.DoBuildBonePositions = time
 					self:InvalidateBoneCache()
 					self:DrawModel()
 					self:SetupBones()
@@ -1971,7 +1992,6 @@ if CLIENT then
 						self:ManipulateBoneScale(i, scales[i])
 					end
 					self.LastBuildBonePositionsTime = 0
-					self.DoBuildBonePositions = time
 					self:InvalidateBoneCache()
 					self:DrawModel()
 					self:SetupBones()
@@ -2099,13 +2119,11 @@ if CLIENT then
 				//Get the rewound bone positions
 				if animent != self then
 					animent.LastBuildBonePositionsTime = 0
-					animent.DoBuildBonePositions = time
 					animent:InvalidateBoneCache()
 					animent:DrawModel()
 					animent:SetupBones()
 				end
 				self.LastBuildBonePositionsTime = 0
-				self.DoBuildBonePositions = time
 				self:InvalidateBoneCache()
 				self:DrawModel()
 				self:SetupBones()
@@ -2129,13 +2147,11 @@ if CLIENT then
 				end
 				if animent != self then
 					animent.LastBuildBonePositionsTime = 0
-					animent.DoBuildBonePositions = time
 					animent:InvalidateBoneCache()
 					animent:DrawModel()
 					animent:SetupBones()
 				end
 				self.LastBuildBonePositionsTime = 0
-				self.DoBuildBonePositions = time
 				self:InvalidateBoneCache()
 				self:DrawModel()
 				self:SetupBones()
@@ -2874,16 +2890,20 @@ elseif CLIENT then
 		end
 		if !self.IsPuppeteer and GetTopmostParentPlayer(self) then
 			shoulddraw = LocalPlayer():ShouldDrawLocalPlayer()
-			if !shoulddraw then
-				if !self.RemovedLocalplayerShadow then
-					self.RemovedLocalplayerShadow = true
-					self:DestroyShadow()
+			//if !self:IsEffectActive(EF_NOSHADOW) then
+				if !shoulddraw then
+					if !self.RemovedLocalplayerShadow then
+						self.RemovedLocalplayerShadow = true
+						self:DestroyShadow()
+					end
+					return
+				elseif shoulddraw and self.RemovedLocalplayerShadow then
+					self.RemovedLocalplayerShadow = nil
+					//if !self:IsEffectActive(EF_NOSHADOW) then
+						self:CreateShadow()
+					//end
 				end
-				return
-			elseif shoulddraw and self.RemovedLocalplayerShadow then
-				self.RemovedLocalplayerShadow = nil
-				self:CreateShadow()
-			end
+			//end
 		end
 
 		//Set the eye target: animprops have custom eye posing functionality that targets a point relative to the entity, 
@@ -2924,13 +2944,12 @@ elseif CLIENT then
 				if GetConVarNumber("cl_draweffectrings") == 0 then return end
 
 				local size = math.Clamp(1 + ((self:GetModelScale() - 1) * 0.5), 1, 50) //effect grip scales up half as fast as the prop itself
-				//if self:BeingLookedAtByLocalPlayer() then
-				//	render.SetMaterial(self.GripMaterialHover) //commented this out because it has a bad interaction with ent.SetSurroundingBoundsType (see comment in Initialize func)
-				//else
+				local mins, maxs = self:GetCollisionBounds()
+				if self:BoxBeingLookedAt(mins, maxs) then
+					render.SetMaterial(self.GripMaterialHover)
+				else
 					render.SetMaterial(self.GripMaterial)
-				//end
-				local _, maxs = self:GetCollisionBounds()
-				
+				end
 				render.DrawSprite(self:GetPos() + (self:GetUp() * (maxs.z / 2)), 16 * size, 16 * size, color_white)
 			elseif mode == 1 then
 				//Draw physics box
@@ -2939,6 +2958,38 @@ elseif CLIENT then
 				local mins, maxs = self:GetCollisionBounds()
 				render.DrawWireframeBox(self:GetPos(), self:GetAngles(), mins, maxs, color_white, true)
 			end
+		end
+		
+	end
+
+	function ENT:BoxBeingLookedAt(mins, maxs) //modified from ENT:BeingLookedAtByLocalPlayer() (https://github.com/Facepunch/garrysmod/blob/master/garrysmod/gamemodes/sandbox/entities/entities/base_gmodentity.lua#L10)
+		
+		local ply = LocalPlayer()
+		if !IsValid(ply) then return false end
+
+		local view = ply:GetViewEntity()
+		local dist = self.MaxWorldTipDistance
+		dist = dist * dist
+
+		local pos, fwd
+		if view:IsPlayer() then
+			//If we're spectating a player, perform an eye trace
+			pos = view:EyePos()
+			fwd = view:GetAimVector()
+		else
+			//If we're not spectating a player, perform a manual trace from the entity's position
+			pos = view:GetPos()
+			fwd = view:GetAngles():Forward()
+		end
+
+		if pos:DistToSqr(self:GetPos()) <= dist then
+			local tr1 = util.TraceLine({
+				start = pos,
+				endpos = pos + (fwd * dist),
+				filter = {view, self}
+			})
+			local tr2_hit, _, tr2_frac = util.IntersectRayWithOBB(pos, fwd * dist, self:GetPos(), self:GetAngles(), mins, maxs)
+			return tr2_hit and tr2_frac < tr1.Fraction //if the trace hits the prop's collision box BEFORE it hits another entity, then we're good!
 		end
 		
 	end
@@ -3434,7 +3485,6 @@ if CLIENT then
 		self.SavedBoneMatrices = {}
 		self.SavedLocalBonePositions = {}
 		self.LastBoneChangeTime = CurTime()
-		self.DoBuildBonePositions = 0
 
 		self:AddCallback("BuildBonePositions", self.BuildBonePositions)
 
@@ -3444,7 +3494,6 @@ if CLIENT then
 		if !IsValid(self) then return end
 		//self.BuildBonePositions_HasRun = true //Newly connected players will add this callback, but then wipe it; this tells the think func that it actually went through
 		local curtime = CurTime()
-		if self.DoBuildBonePositions < curtime then return end //don't run this func this frame until our think func lets us, otherwise bad stuff can happen (see think func comment)
 
 		//Handle in-code tf2 minigun animation, even if we don't want to do all the expensive advbonemerge stuff
 		if self.MinigunAnimBone then
