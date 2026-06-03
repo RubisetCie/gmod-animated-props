@@ -5,8 +5,6 @@ local surface = surface
 local draw = draw
 local math = math
 local net = net
-local color_white = color_white
-local color_black = color_black
 
 if SERVER then
 
@@ -30,6 +28,10 @@ else
 	CreateClientConVar("cl_animprop_editor_d", "200", true, false, "Position of the central divider in the animated prop editor's animation page", d_min, d_max) //^
 	CreateClientConVar("cl_animprop_editor_d2", "346", true, false, "Position of the central divider in the animated prop editor's poseparam page", d2_min, d2_max) //default is wide enough to snugly fit poseparam options
 	CreateClientConVar("cl_animprop_editor_d3", "200", true, false, "Position of the central divider in the animated prop editor's remapping page", d3_min, d3_max) //default is wide enough for bone and option names to be legible
+	CreateClientConVar("cl_animprop_editor_bone_multiselect", "0", true, false, "Remapping controls: Enable selecting multiple bones", 0, 1)
+	CreateClientConVar("cl_animprop_editor_bone_hierarchyview", "0", true, false, "Remapping controls: Display bone list as hierarchy", 0, 1)
+	CreateClientConVar("cl_animprop_editor_bone_ids", "1", true, false, "Remapping controls: Show bone ID numbers", 0, 1)
+	CreateClientConVar("cl_animprop_editor_bone_linkicons", "0", true, false, "Remapping controls: Show icons for linked/unlinked bones", 0, 1)
 
 	animpropwindows = {}
 
@@ -145,6 +147,9 @@ properties.Add("makeanimprop", {
 		//This option removes the old ent and replaces it with an animated prop, so if players aren't allowed 
 		//to remove things, then they shouldn't be allowed to turn things into animated props either
 		if !gamemode.Call("CanProperty", ply, "remover", ent) then return false end
+
+		//If this is an old animprop entity, don't show this option, instead show the upgrade option
+		if properties.List["animprop_backcomp"]:Filter(ent, ply) then return false end
 
 		return true
 
@@ -300,7 +305,7 @@ if SERVER then
 		for i = 2, 4 do
 			prop["SetChannel" .. i .. "LayerSettings"](prop, vector_up)
 		end
-		//carry over the sequence if we convert something like an npc, but make sure ragdolls and the like still start out with no sequence
+		//carry over the sequence if we convert something like an npc; ragdolls will start off with either no sequence or the ref pose sequence
 		if ent:SequenceDuration() > 0 then
 			prop:SetChannel1Sequence(ent:GetSequence())
 		end
@@ -375,13 +380,13 @@ if SERVER then
 
 		//Copy certain non-physics constraints over to the animprop
 		local ConstraintsToPreserve = {
-			["AdvBoneMerge"] = true,
-			["AttachParticleControllerBeam"] = true, //Advanced Particle Controller addon
-			["PartCtrl_Ent"] = true, //ParticleControlOverhaul
-			["PartCtrl_SpecialEffect"] = true, //ParticleControlOverhaul
-			//["BoneMerge"] = true, //Bone Merger addon
-			["EasyBonemerge"] = true, //Easy Bonemerge Tool addon
-			["CompositeEntities_Constraint"] = true, //Composite Bonemerge addon
+			AdvBoneMerge = true,
+			AttachParticleControllerBeam = true, //old Advanced Particle Controller addon
+			PEPlus_Ent = true, //Particle Effects+ addon
+			PEPlus_SpecialEffect = true, //Particle Effects+ addon
+			//BoneMerge = true, //Bone Merger addon
+			EasyBonemerge = true, //Easy Bonemerge Tool addon
+			CompositeEntities_Constraint = true, //Composite Bonemerge addon
 		}
 		local oldentconsts = constraint.GetTable(oldent)
 		for k, const in pairs (oldentconsts) do
@@ -393,12 +398,12 @@ if SERVER then
 							const[key] = prop 
 						//Transfer over bonemerged ents from other addons' bonemerge constraints, and make sure they don't get DeleteOnRemoved
 						elseif (const.Type == "EasyBonemerge" or const.Type == "CompositeEntities_Constraint" 
-						or const.Type == "PartCtrl_Ent" or const.Type == "PartCtrl_SpecialEffect") //doesn't work for BoneMerge, bah
+						or const.Type == "PEPlus_Ent" or const.Type == "PEPlus_SpecialEffect") //doesn't work for BoneMerge, bah
 						and isentity(val) and IsValid(val) and val:GetParent() == oldent then
 							//MsgN("reparenting ", val:GetModel(), " ", val, " to ", prop)
 							if const.Type == "CompositeEntities_Constraint" then
 								val:SetParent(prop)
-							--[[elseif const.Type == "PartCtrl_SpecialEffect" then //seems to be redundant here but not in advbonemerge, not sure why
+							--[[elseif const.Type == "PEPlus_SpecialEffect" then //seems to be redundant here but not in advbonemerge, not sure why
 								val:SetParent(prop)
 								val:SetSpecialEffectParent(prop)]]
 							end
@@ -418,22 +423,20 @@ if SERVER then
 						entstab[const.Entity[tabnum].Index] = const.Entity[tabnum].Entity
 					end
 
-					if const.Type == "PartCtrl_Ent" --[[or const.Type == "PartCtrl_SpecialEffect"]] and IsValid(const.Ent1) then //again, PartCtrl_SpecialEffect handling doesn't seem to be necessary here for some reason
+					if const.Type == "PEPlus_Ent" --[[or const.Type == "PEPlus_SpecialEffect"]] and IsValid(const.Ent1) then //again, PEPlus_SpecialEffect handling doesn't seem to be necessary here for some reason
 						oldent:DontDeleteOnRemove(const.Ent1) //Make sure we also clear deleteonremove for unparented cpoints
-						//if const.Type == "PartCtrl_Ent" then
-							//Tell clients to retrieve the updated info table (the constraint func will change the relevant value to point to our ent)
-							timer.Simple(0.1, function() //do this on a timer, otherwise the advbonemerge ent might not exist on the client yet when they receive the new table
-								net.Start("PartCtrl_InfoTableUpdate_SendToCl")
-									net.WriteEntity(const.Ent1)
-								net.Broadcast()
-							end)
-						//end
 					end
 
 					//Now copy the constraint over to the prop
 					duplicator.CreateConstraintFromTable(const, entstab)
 				end
 			end
+		end
+		//Unbreak all Particle Effects+ fx attached to the prop or any of its children
+		if PEPlus_RefreshAllChildFx then 
+			timer.Simple(0.1, function() //do this on a timer, otherwise the prop might not exist on the client yet when they receive the new table
+				PEPlus_RefreshAllChildFx(prop)
+			end)
 		end
 
 		//Freeze the prop
@@ -477,50 +480,64 @@ end
 //Draw name and position of selected bones if editor window's remapping tab is open
 //And the award for ugliest nested "if x then" checks goes to...
 if CLIENT then
+	local colorborder = Color(0,0,0,255)
+	local colorselect = Color(0,255,0,255)
+	local colorunselect = Color(255,255,255,255)
+
 	hook.Add("HUDPaint", "AnimProp_HUDPaint_DrawRemappingBones", function()
 		if g_ContextMenu and g_ContextMenu:IsVisible() then
+			local function DrawBonePos(_ent, id, selected)
+				local _pos = nil
+				local matr = _ent:GetBoneMatrix(id)
+				if matr then 
+					_pos = matr:GetTranslation() 
+				else
+					_pos = _ent:GetBonePosition(id) 
+				end
+				_name = _ent:GetBoneName(id)
+
+				if !_pos then return end
+				local _pos = _pos:ToScreen()
+				local textpos = {x = _pos.x+5,y = _pos.y-5}
+
+				if selected then
+					draw.RoundedBox(0,_pos.x - 3,_pos.y - 3,6,6,colorborder)
+					draw.RoundedBox(0,_pos.x - 1,_pos.y - 1,2,2,colorselect)
+					draw.SimpleTextOutlined(_name,"Default",textpos.x,textpos.y,colorselect,TEXT_ALIGN_LEFT,TEXT_ALIGN_BOTTOM,2,colorborder)
+				else
+					draw.RoundedBox(0,_pos.x - 2,_pos.y - 2,4,4,colorborder)
+					draw.RoundedBox(0,_pos.x - 1,_pos.y - 1,2,2,colorunselect)
+					draw.SimpleTextOutlined(_name,"Default",textpos.x,textpos.y,colorunselect,TEXT_ALIGN_LEFT,TEXT_ALIGN_BOTTOM,1,colorborder)
+				end
+			end
+
+			//If we're hovering over an unselected bone in the bonelist or targetbonelist, draw 
+			//its name and position; do this first so that the selected bones draw on top of it
+			local hov = vgui:GetHoveredPanel()
+			if IsValid(hov) and istable(hov.AnimProp_BoneHoverData) and IsValid(hov.AnimProp_BoneHoverData.ent) then
+				DrawBonePos(hov.AnimProp_BoneHoverData.ent, hov.AnimProp_BoneHoverData.id, false)
+			end
+
+			//Draw the name and position of all bones currently selected in each window's bonelist
 			for _, window in pairs(animpropwindows) do
 				if window.Control and window.Control.TabPanel and window.Control.TabPanel:GetActiveTab():GetText() == "Remapping" then
-
 					local ent = window.Control.m_Entity
 					if IsValid(ent) then
 						local ent2 = ent:GetPuppeteer()
 						if IsValid(ent2) then
-
 							local back = window.Control.Remapping
 							if back and back.BoneList then
-								local id1 = back.BoneList.selectedbone
-								local id2 = -1
-								local targetbonestr = ent.RemapInfo[id1]["parent"]
-								if targetbonestr != "" then id2 = ent2:LookupBone(targetbonestr) end
+								for _, line in pairs (back.BoneList:GetSelected()) do
+									DrawBonePos(ent, line.id, true)
 
-								local function DrawBonePos(_ent, id)
-									local _pos = nil
-									local matr = _ent:GetBoneMatrix(id)
-									if matr then 
-										_pos = matr:GetTranslation() 
-									else
-										_pos = _ent:GetBonePosition(id) 
-									end
-									_name = _ent:GetBoneName(id)
-
-									if !_pos then return end
-									local _pos = _pos:ToScreen()
-									local textpos = {x = _pos.x+5,y = _pos.y-5}
-
-									draw.RoundedBox(0,_pos.x - 2,_pos.y - 2,4,4,color_black)
-									draw.RoundedBox(0,_pos.x - 1,_pos.y - 1,2,2,color_white)
-									draw.SimpleTextOutlined(_name,"Default",textpos.x,textpos.y,color_white,TEXT_ALIGN_LEFT,TEXT_ALIGN_BOTTOM,1,color_black)
-								end
-								DrawBonePos(ent, id1)
-								if id2 != -1 then
-									DrawBonePos(ent2, id2)
+									local id2 = -1
+									local targetbonestr = ent.RemapInfo[line.id].parent
+									if targetbonestr != "" then id2 = ent2:LookupBone(targetbonestr) end
+									if id2 != -1 then DrawBonePos(ent2, id2, true) end
 								end
 							end
-
 						end
 					end
-
 				end
 			end
 		end
@@ -682,3 +699,8 @@ if CLIENT then
 		m:AddCVar("Draw Animated Prop Physics Boxes", "cl_animprop_drawphysboxes", "1", "0")
 	end)]]--
 end
+
+//Add convars to control max prop size in multiplayer, for anti-griefing purposes
+CreateConVar("sv_animprop_scale_min", 0.0625, {FCVAR_ARCHIVE, FCVAR_REPLICATED}, "In multiplayer games, sets minimum scale of animated props")
+CreateConVar("sv_animprop_scale_max", 16, {FCVAR_ARCHIVE, FCVAR_REPLICATED}, "In multiplayer games, sets maximum scale of animated props")
+CreateConVar("sv_animprop_scale_max_phys", 16, {FCVAR_ARCHIVE, FCVAR_REPLICATED}, "In multiplayer games, sets maximum scale of animated props before they're forced to use effect physics")

@@ -2,489 +2,475 @@
 
 AddCSLuaFile()
 
-if CLIENT then return end
-//if SERVER then return end //uncomment this when we need to use the old tool for something
+local IsValid = IsValid
+local conversion_funcs = {}
+conversion_funcs = {
+	animprop_generic = function(ent, ply)
+		local par = ent:GetParent()
+		if !IsValid(par) or !ent.IsPhysified or par:GetClass() != "animprop_generic_physmodel" or par.ConfirmationID != ent.ConfirmationID then par = nil end
+		local animprop = ConvertEntityToAnimprop(ent, ply, true, false)
+		if IsValid(animprop) then 
+			//Convert animation settings
+			animprop:SetChannel1Sequence(animprop:LookupSequence(ent.MyAnim)) //sequence is stored as name string instead of id number
+			animprop:SetChannel1Speed(ent.MyPlaybackRate)
+			animprop:SetChannel1Pause(ent.IsPaused)
+			animprop:SetChannel1PauseFrame(ent.PauseFrame)
 
-duplicator.RegisterEntityClass("animprop_generic", function(ply, data)
+			//Convert the gesture, if applicable
+			if ent.EntityMods and ent.EntityMods.GesturizerEntity and ent.EntityMods.GesturizerEntity.AnimName then //TODO: does it work this way for a spawned entity?
+				animprop:SetChannel2Sequence(animprop:LookupSequence(ent.EntityMods.GesturizerEntity.AnimName)) //sequence is stored as name string instead of id number
+				ent.EntityMods.GesturizerEntity = nil
+				duplicator.ClearEntityModifier(animprop, "GesturizerEntity")
+			end
 
-	//Create a dummy entity with the data table and convert it into an animprop
-	data.Class = "base_gmodentity"
-	data.PhysicsObjects = nil //don't copy this, it'll break stuff
-	local EntityMods = data.EntityMods //the duplicator will apply entitymods to the new animprop after this function finishes; don't pre-apply them to the dummy, or they'll get applied twice
-	local BoneMods = data.BoneMods //this too
-	data.EntityMods = nil
-	data.BoneMods = nil
-	local dummy = duplicator.GenericDuplicatorFunction(ply, data)
-	data.EntityMods = EntityMods
-	data.BoneMods = BoneMods
-	if !IsValid(dummy) then return end
-	local animprop = ConvertEntityToAnimprop(dummy, ply, true, true)
-	if !IsValid(animprop) then dummy:Remove() return end
+			//Convert pose parameters, if applicable
+			animprop.PoseParams = {} //create a new poseparams table, and use either the duped values, or if those are nil, the hard-coded default values from the old entity
+			for i = 0, animprop:GetNumPoseParameters() - 1 do
+				local name = animprop:GetPoseParameterName(i)
 
-	//Convert animation settings
-	animprop:SetChannel1Sequence(animprop:LookupSequence(data.MyAnim)) //sequence is stored as name string instead of id number
-	animprop:SetChannel1Speed(data.MyPlaybackRate)
-	animprop:SetChannel1Pause(data.IsPaused)
-	animprop:SetChannel1PauseFrame(data.PauseFrame)
+				local default = animprop:GetPoseParameter(name)
+				if name == "move_scale" then
+					default = 1
+				elseif name == "aim_pitch" then
+					default = ent.StoredAimPitch or 0
+				elseif name == "aim_yaw" then
+					default = ent.StoredAimYaw or 0
+				elseif name == "body_pitch" then
+					default = ent.StoredAimPitch or 0
+				elseif name == "body_yaw" then
+					default = ent.StoredAimYaw or 0
+				elseif name == "move_x" then
+					default = ent.StoredMoveX or 1
+				elseif name == "move_y" then
+					default = ent.StoredMoveY or 0
+				elseif name == "move_yaw" then
+					default = ent.StoredMoveYaw or 0
+				end
+				animprop.PoseParams[i] = default
+			end
 
-	//Convert the gesture, if applicable
-	if data.EntityMods and data.EntityMods.GesturizerEntity and data.EntityMods.GesturizerEntity.AnimName then
-		animprop:SetChannel2Sequence(animprop:LookupSequence(data.EntityMods.GesturizerEntity.AnimName)) //sequence is stored as name string instead of id number
-		data.EntityMods.GesturizerEntity = nil
-		duplicator.ClearEntityModifier(animprop, "GesturizerEntity")
-	end
+			//Physics
+			if par then
+				animprop:SetPhysicsMode(0) //use prop physics (or box physics for non-props)
+				animprop:UpdateAnimpropPhysics() //update the physics immediately so we can freeze it
+				//Freeze the animprop if the old ent's physmodel was frozen
+				if IsValid(animprop:GetPhysicsObject()) and IsValid(par:GetPhysicsObject()) and !par:GetPhysicsObject():IsMotionEnabled() then
+					animprop:GetPhysicsObject():EnableMotion(false)
+				end
+				//The old ent gives animprops physics by parenting them to a separate physmodel entity.
+				//Grab the constraints from the parent and transfer them over to the new prop.
+				for k, const in pairs (table.Copy(constraint.GetTable(par))) do
+					if const.Entity then
+						//If any of the values in the constraint table are the physmodel, switch them over to the animprop
+						for key, val in pairs (const) do
+							if type(val) == "Entity" then
+								if key == par then const[key] = animprop end
+								//MsgN(key, ": ", val)
+							end
+						end
 
-	//Convert pose parameters, if applicable
-	animprop.PoseParams = {} //create a new poseparams table, and use either the duped values, or if those are nil, the hard-coded default values from the old entity
-	for i = 0, animprop:GetNumPoseParameters() - 1 do
-		local name = animprop:GetPoseParameterName(i)
+						local entstab = {}
 
-		local default = animprop:GetPoseParameter(name)
-		if name == "move_scale" then
-			default = 1
-		elseif name == "aim_pitch" then
-			default = data.StoredAimPitch or 0
-		elseif name == "aim_yaw" then
-			default = data.StoredAimYaw or 0
-		elseif name == "body_pitch" then
-			default = data.StoredAimPitch or 0
-		elseif name == "body_yaw" then
-			default = data.StoredAimYaw or 0
-		elseif name == "move_x" then
-			default = data.StoredMoveX or 1
-		elseif name == "move_y" then
-			default = data.StoredMoveY or 0
-		elseif name == "move_yaw" then
-			default = data.StoredMoveYaw or 0
-		end
-		animprop.PoseParams[i] = default
-	end
+						//Also switch over any instances of physmodel to animprop inside the entity subtable
+						for tabnum, tab in pairs (const.Entity) do
+							if tab.Entity == par then
+								const.Entity[tabnum].Entity = animprop
+								const.Entity[tabnum].Index = animprop:EntIndex()	
+							end
+							entstab[const.Entity[tabnum].Index] = const.Entity[tabnum].Entity
+						end
 
-	//Physics
-	animprop:SetModelScale(data.MyModelScale) //scale is stored in a separate value for no reason
-	if data.IsPhysified and data.ConfirmationID then
-		animprop.ConfirmationID = data.ConfirmationID  //this was used by the "physmodel" entity to associate itself with the animprop - we don't need a separate entity 
-		animprop:SetPhysicsMode(0) //use prop physics  //for this any more, but we still need to match them up so we can move the constraints over to the animprop (see below)
-		//don't worry about EnableMotion; in the old addon, physified animprops don't load this value and always spawn unfrozen
-	else
-		animprop:SetPhysicsMode(2) //use effect physics
-		animprop:SetCollisionGroup(COLLISION_GROUP_WORLD) //make sure we don't push anything away now that we're physical
-		local phys = animprop:GetPhysicsObject()
-		if IsValid(phys) then phys:EnableMotion(false) end //also make sure we don't get pushed away by the world if we're flush against it
-	end
-
-	return animprop
-
-end, "Data")
-
-duplicator.RegisterEntityClass("animprop_generic_physmodel", function(ply, data)
-
-	//Create a dummy entity with the data table
-	data.Class = "base_gmodentity"
-	local EntityMods = data.EntityMods //the duplicator will apply entitymods to the new animprop after this function finishes; don't pre-apply them to the dummy, or they'll get applied twice
-	local BoneMods = data.BoneMods //this too
-	data.EntityMods = nil
-	data.BoneMods = nil
-	local dummy = duplicator.GenericDuplicatorFunction(ply, data)
-	data.EntityMods = EntityMods
-	data.BoneMods = BoneMods
-	if !IsValid(dummy) then return end
-
-	//Give it a physics object so all constraints attached to it are created properly
-	dummy:PhysicsInitBox(Vector(-2,-2,-2), Vector(2,2,2))
-	local phys = dummy:GetPhysicsObject()
-	if IsValid(phys) then phys:EnableMotion(false) end
-	dummy:SetCollisionGroup(COLLISION_GROUP_WORLD)
-
-	dummy.Think = function()
-
-		//Physmodel ents are associated with their animprops with a randomly generated ID assigned to both of them, as well as a nocollide constraint.
-		//This function tries to find and return an entity's associated animprop, or if it can't find it, return the entity.
-		local function FindPhysmodelAnimprop(ent)
-
-			if ent.ConfirmationID and ent:GetClass() == "base_gmodentity" then
-
-				local constrainedents = table.Copy(constraint.GetAllConstrainedEntities(ent))
-				for _, ent2 in pairs (constrainedents) do
-					if ent2 != ent and ent2.ConfirmationID and ent2.ConfirmationID == ent.ConfirmationID then
-						return ent2, true
+						duplicator.CreateConstraintFromTable(table.Copy(const), table.Copy(entstab))
 					end
 				end
-
-				return ent, false
-
 			else
-
-				return ent, false
-
+				animprop:SetPhysicsMode(2) //use effect physics
+				animprop:UpdateAnimpropPhysics() //also necessary here to fix an issue where some props still have full-sized physboxes as effects
+				animprop:SetCollisionGroup(COLLISION_GROUP_WORLD) //make sure we don't push anything away now that we're physical
+				local phys = animprop:GetPhysicsObject()
+				if IsValid(phys) then phys:EnableMotion(false) end //also make sure we don't get pushed away by the world if we're flush against it
 			end
-
 		end
+		return IsValid(animprop)
+	end,
+	//animprop_generic_physmodel doesn't need a func here, it's handled by its child animprop
+	//"Premade" animprops were originally made because it wasn't possible to add their particle effects or multiple models yourself at the time. 
+	//Nowadays, though, we have Particle Effects+/Adv. Particle Controller for particle effects, and Advanced Bonemerge for multiple models,
+	//so they really aren't necessary any more. Spawn regular animprops modified with those tools instead.
+	animprop_spawnacarrier = function(ent, ply)
+		local animprop = ConvertEntityToAnimprop(ent, ply, true, false)
+		if IsValid(animprop) then
+			//Create a second animprop for the detail parts
+			local dummy = ents.Create("prop_dynamic")
+			if !IsValid(dummy) then return end
+			dummy:SetPos(animprop:GetPos())
+			dummy:SetAngles(animprop:GetAngles())
+			dummy:SetModel("models/bots/boss_bot/carrier_parts.mdl")
+			local animprop2 = ConvertEntityToAnimprop(dummy, ply, true, true)
+			if !IsValid(animprop2) then dummy:Remove() return end
+			animprop2:SetChannel1Sequence(animprop2:LookupSequence("radar_idles"))
 
-		//If the physmodel is orphaned somehow and doesn't have an associated animprop, then remove it and stop here
-		local ouranimprop = FindPhysmodelAnimprop(dummy)
-		if ouranimprop == dummy then dummy:Remove() return end
-
-		//We need to move all the constraints from the physmodel to its animprop, but some of the constraints won't be created correctly for some reason if we apply them 
-		//in the first think, so instead we're making a table of constraints in the first think, and then checking for that table here so it gets used in the second think.
-		if dummy.ConstraintsToMove then
-			//Fix some old animprops falling through the world because they're nocollided with it using an advballsocket constraint.
-			//constraint.RemoveConstraints won't affect the original constraint for some reason, so instead we need to make an identical one here 
-			//and remove it immediately after, and that'll fix it somehow. Yes, this works.
-			local const = constraint.AdvBallsocket(ouranimprop, game.GetWorld(), 0, 0, ouranimprop:GetPos(), vector_origin, 0, 0, -180, -180, -180, 180, 180, 180, 0, 0, 0, 1, 1)
-			const:Remove()
-
-			for k, v in pairs (dummy.ConstraintsToMove) do
-				duplicator.CreateConstraintFromTable(v.const, v.entstab)
+			if CreateAdvBonemergeEntity then
+				//Attach the parts with adv bonemerge tool
+				animprop2 = CreateAdvBonemergeEntity(animprop2, animprop, ply, false, false, true)
+				constraint.AdvBoneMerge(animprop, animprop2, ply)
+				animprop2.AdvBone_BoneInfo_IsDefault = false
+			else
+				//If the adv bonemerge addon isn't installed, then weld the parts as a fallback
+				animprop2:SetPhysicsMode(2) //use effect physics
+				animprop2:UpdateAnimpropPhysics() //update the physics immediately so we can weld it
+				animprop2:SetCollisionGroup(COLLISION_GROUP_WORLD) //make sure we don't push anything away now that we're physical
+				local phys = animprop2:GetPhysicsObject()
+				//if IsValid(phys) then phys:EnableMotion(false) end //also make sure we don't get pushed away by the world if we're flush against it
+				animprop2:SetPos(animprop:GetPos())
+				animprop2:SetAngles(animprop:GetAngles())
+				constraint.Weld(animprop, animprop2, 0, 0, 0, true, false)
 			end
-			dummy:Remove()
-			return
 		end
+		return IsValid(animprop)
+	end,
+	_animprop_spawnteleporter_ = function(ent, ply, team, lv, entrance)
+		local animprop = ConvertEntityToAnimprop(ent, ply, true, false)
+		if IsValid(animprop) then
+			local phys = animprop:GetPhysicsObject()
+			if IsValid(phys) then phys:EnableMotion(false) end
 
-		//Make a table of constraints we want to move
-		local constraints = table.Copy(constraint.GetTable(dummy))
-		dummy.ConstraintsToMove = {}
-		for k, const in pairs (constraints) do
-			if const.Entity then
-				//If any of the values in the constraint table are physmodels, switch them over to their animprops
-				for key, val in pairs (const) do
-					if type(val) == "Entity" then
-						const[key] = FindPhysmodelAnimprop(val)
-						//MsgN(key, ": ", val)
-					end
-				end
+			//Add particle effects
+			if team then
+				team = "blue"
+			else
+				team = "red"
+			end
+			lv = tostring(lv)
+			if entrance then
+				entrance = "entrance"
+			else
+				entrance = "exit"
+			end
+			if PEPlus_SpawnParticle then
+				//Attach the particles with Particle Effects+
 
-				local entstab = {}
-
-				//Also switch over any instances of physmodels to animprops inside the entity subtable
-				for tabnum, tab in pairs (const.Entity) do
-					if tab.Entity then
-						local animprop, foundanimprop = FindPhysmodelAnimprop(const.Entity[tabnum].Entity)
-						//MsgN(tab.Entity, " ", animprop, " ", foundanimprop)
-						if foundanimprop then
-							const.Entity[tabnum].Entity = animprop
-							const.Entity[tabnum].Index = animprop:EntIndex()	
+				//Charged effect
+				local p = PEPlus_SpawnParticle(ply, animprop:GetPos(), "teleporter_" .. team .. "_charged_level" .. lv, "particles/teleport_status.pcf", "tf", true)
+				if IsValid(p) then
+					for k, v in pairs (p.ParticleInfo) do
+						if v.ent then
+							p:AttachToEntity(animprop, k, 0, ply, false)
 						end
 					end
-					entstab[const.Entity[tabnum].Index] = const.Entity[tabnum].Entity
 				end
 
-				dummy.ConstraintsToMove[k] = {const = table.Copy(const), entstab = table.Copy(entstab)}
+				//Direction effect
+				local p = PEPlus_SpawnParticle(ply, animprop:GetPos(), "teleporter_" .. team .. "_" .. entrance .. "_level" .. lv, "particles/teleport_status.pcf", "tf", true)
+				if IsValid(p) then
+					for k, v in pairs (p.ParticleInfo) do
+						if v.ent then
+							p:AttachToEntity(animprop, k, 0, ply, false)
+						end
+					end
+				end
+
+				//Arm effect 1 (apparently charged teleporters have these as well https://github.com/ValveSoftware/source-sdk-2013/blob/master/src/game/client/tf/c_obj_teleporter.cpp#L96-L129)
+				local p = PEPlus_SpawnParticle(ply, animprop:GetPos(), "teleporter_arms_circle_" .. team, "particles/teleport_status.pcf", "tf", true)
+				if IsValid(p) then
+					for k, v in pairs (p.ParticleInfo) do
+						if v.ent then
+							p:AttachToEntity(animprop, k, 1, ply, false)
+						end
+					end
+				end
+
+				//Arm effect 2
+				local p = PEPlus_SpawnParticle(ply, animprop:GetPos(), "teleporter_arms_circle_" .. team, "particles/teleport_status.pcf", "tf", true)
+				if IsValid(p) then
+					for k, v in pairs (p.ParticleInfo) do
+						if v.ent then
+							p:AttachToEntity(animprop, k, 3, ply, false)
+						end
+					end
+				end
+			elseif AttachParticleControllerNormal then
+				//Attach the particles with old Adv. Particle Controller as a fallback
+				local genericparticletable = {
+					RepeatRate = 0,
+					RepeatSafety = 1,
+
+					Toggle = 1,
+					StartOn = 1,
+					NumpadKey = 0,
+
+					UtilEffectInfo = Vector(1,1,1),
+					ColorInfo = Color(1,1,1,1)
+				}
+
+				//Charged effect
+				local tab = table.Copy(genericparticletable)
+				tab.EffectName = "teleporter_" .. team .. "_charged_level" .. lv
+				tab.AttachNum = 0
+				AttachParticleControllerNormal(ply, animprop, {NewTable = tab})
+
+				//Direction effect
+				local tab = table.Copy(genericparticletable)
+				tab.EffectName = "teleporter_" .. team .. "_" .. entrance .. "_level" .. lv
+				tab.AttachNum = 0
+				AttachParticleControllerNormal(ply, animprop, {NewTable = tab})
+
+				//Arm effect 1
+				local tab = table.Copy(genericparticletable)
+				tab.EffectName = "teleporter_arms_circle_" .. team
+				tab.AttachNum = 1
+				AttachParticleControllerNormal(ply, animprop, {NewTable = tab})
+
+				//Arm effect 2
+				local tab = table.Copy(genericparticletable)
+				tab.EffectName = "teleporter_arms_circle_" .. team
+				tab.AttachNum = 3
+				AttachParticleControllerNormal(ply, animprop, {NewTable = tab})
 			end
 		end
+		return IsValid(animprop)
+	end,
+	animprop_spawnentrance_blue = function(ent, ply) return conversion_funcs["_animprop_spawnteleporter_"](ent, ply, true, 1, true) end,
+	animprop_spawnentrance_blue3 = function(ent, ply) return conversion_funcs["_animprop_spawnteleporter_"](ent, ply, true, 3, true) end,
+	animprop_spawnentrance_red = function(ent, ply) return conversion_funcs["_animprop_spawnteleporter_"](ent, ply, false, 1, true) end,
+	animprop_spawnentrance_red3 = function(ent, ply) return conversion_funcs["_animprop_spawnteleporter_"](ent, ply, false, 3, true) end,
+	animprop_spawnexit_blue = function(ent, ply) return conversion_funcs["_animprop_spawnteleporter_"](ent, ply, true, 1, false) end,
+	animprop_spawnexit_blue3 = function(ent, ply) return conversion_funcs["_animprop_spawnteleporter_"](ent, ply, true, 3, false) end,
+	animprop_spawnexit_red = function(ent, ply) return conversion_funcs["_animprop_spawnteleporter_"](ent, ply, false, 1, false) end,
+	animprop_spawnexit_red3 = function(ent, ply) return conversion_funcs["_animprop_spawnteleporter_"](ent, ply, false, 3, false) end,
+	_animprop_spawnminisentry_ = function(ent, ply, team)
+		local animprop = ConvertEntityToAnimprop(ent, ply, true, false)
+		if IsValid(animprop) then
+			local phys = animprop:GetPhysicsObject()
+			if IsValid(phys) then phys:EnableMotion(false) end
 
-	end
+			//Add particle effects
+			if team then
+				team = ""
+			else
+				team = "_red"
+			end
+			if PEPlus_SpawnParticle then
+				//Attach the particles with Particle Effects+
+				//Light effect
+				local p = PEPlus_SpawnParticle(ply, animprop:GetPos(), "cart_flashinglight" .. team, "particles/flag_particles.pcf", "tf", true)
+				if IsValid(p) then
+					for k, v in pairs (p.ParticleInfo) do
+						if v.ent then
+							p:AttachToEntity(animprop, k, 3, ply, false)
+						end
+					end
+				end
+			elseif AttachParticleControllerNormal then
+				//Attach the particles with old Adv. Particle Controller as a fallback
+				//Light effect
+				AttachParticleControllerNormal(ply, animprop, {NewTable = {
+					EffectName = "cart_flashinglight" .. team,
+					AttachNum = 3,
 
-	return dummy
+					RepeatRate = 0,
+					RepeatSafety = 1,
 
-end, "Data")
+					Toggle = 1,
+					StartOn = 1,
+					NumpadKey = 0,
 
-//"Premade" animprops were originally made because it wasn't possible to add their particle effects or multiple models yourself at the time. Nowadays, though, we have the adv particle
-//controller (for particle effects) and the adv bonemerge tool (for multiple models), so they really aren't necessary any more. Spawn regular animprops modified with those tools instead.
-
-duplicator.RegisterEntityClass("animprop_spawnacarrier", function(ply, data)
-
-	data.Model = "models/bots/boss_bot/carrier.mdl"
-
-	//Create a dummy entity with the data table and convert it into an animprop
-	data.Class = "base_gmodentity"
-	data.PhysicsObjects = nil //don't copy this, it'll break stuff
-	local EntityMods = data.EntityMods //the duplicator will apply entitymods to the new animprop after this function finishes; don't pre-apply them to the dummy, or they'll get applied twice
-	local BoneMods = data.BoneMods //this too
-	data.EntityMods = nil
-	data.BoneMods = nil
-	local dummy = duplicator.GenericDuplicatorFunction(ply, data)
-	data.EntityMods = EntityMods
-	data.BoneMods = BoneMods
-	if !IsValid(dummy) then return end
-	local animprop = ConvertEntityToAnimprop(dummy, ply, true, true)
-	if !IsValid(animprop) then dummy:Remove() return end
-
-	animprop:SetPhysicsMode(2) //use effect physics
-	animprop:SetCollisionGroup(COLLISION_GROUP_WORLD) //make sure we don't push anything away now that we're physical
-	local phys = animprop:GetPhysicsObject()
-	if IsValid(phys) then phys:EnableMotion(false) end //also make sure we don't get pushed away by the world if we're flush against it
-
-	//Create a second animprop for the detail parts
-	local dummy2 = ents.Create("prop_dynamic")
-	if !IsValid(dummy2) then return end
-	dummy2:SetPos(animprop:GetPos())
-	dummy2:SetAngles(animprop:GetAngles())
-	dummy2:SetModel("models/bots/boss_bot/carrier_parts.mdl")
-	local animprop2 = ConvertEntityToAnimprop(dummy2, ply, true, true)
-	if !IsValid(animprop2) then dummy2:Remove() return end
-	animprop2:SetChannel1Sequence(animprop2:LookupSequence("radar_idles"))
-
-	if CreateAdvBonemergeEntity then
-		//Attach the parts with adv bonemerge tool
-		animprop2 = CreateAdvBonemergeEntity(animprop2, animprop, ply, false, false, true)
-		constraint.AdvBoneMerge(animprop, animprop2, ply)
-		animprop2.AdvBone_BoneInfo_IsDefault = false
-	else
-		//If the adv bonemerge addon isn't installed, then weld the parts as a fallback
-		animprop2:SetPhysicsMode(2) //use effect physics
-		animprop2:SetCollisionGroup(COLLISION_GROUP_WORLD) //make sure we don't push anything away now that we're physical
-		local phys = animprop2:GetPhysicsObject()
-		if IsValid(phys) then phys:EnableMotion(false) end //also make sure we don't get pushed away by the world if we're flush against it
-		animprop2:SetPos(animprop:GetPos())
-		animprop2:SetAngles(animprop:GetAngles())
-		constraint.Weld(animprop, animprop2, 0, 0, 0, true, false)
-	end
-
-	return animprop
-	
-end, "Data")
-
-local function SpawnTeleporter(ply, data, team, level, entrance)
-
-	data.Model = "models/buildables/teleporter_light.mdl"
-	data.Skin = team
-
-	//Create a dummy entity with the data table and convert it into an animprop
-	data.Class = "base_gmodentity"
-	data.PhysicsObjects = nil //don't copy this, it'll break stuff
-	local EntityMods = data.EntityMods //the duplicator will apply entitymods to the new animprop after this function finishes; don't pre-apply them to the dummy, or they'll get applied twice
-	local BoneMods = data.BoneMods //this too
-	data.EntityMods = nil
-	data.BoneMods = nil
-	local dummy = duplicator.GenericDuplicatorFunction(ply, data)
-	data.EntityMods = EntityMods
-	data.BoneMods = BoneMods
-	if !IsValid(dummy) then return end
-	local animprop = ConvertEntityToAnimprop(dummy, ply, true, true)
-	if !IsValid(animprop) then dummy:Remove() return end
-
-	animprop:SetChannel1Sequence(animprop:LookupSequence("running"))
-	local phys = animprop:GetPhysicsObject()
-	if IsValid(phys) then phys:EnableMotion(false) end
-
-	animprop:SetBodygroup(1,1) //blur
-	if entrance then animprop:SetBodygroup(2,1) end //arrow
-
-	//Add particle effects with adv particle controller
-	if AttachParticleControllerNormal then
-		if team == 0 then
-			team = "red"
-		else
-			team = "blue"
+					UtilEffectInfo = Vector(1,1,1),
+					ColorInfo = Color(1,1,1,1)
+				}})
+			end
 		end
-		level = tostring(level)
-		if entrance then
-			entrance = "entrance"
-		else
-			entrance = "exit"
+		return IsValid(animprop)
+	end,
+	animprop_spawnminisentry_blue = function(ent, ply) return conversion_funcs["_animprop_spawnminisentry_"](ent, ply, true) end,
+	animprop_spawnminisentry_red = function(ent, ply) return conversion_funcs["_animprop_spawnminisentry_"](ent, ply, false) end,
+	_animprop_spawntank_ = function(ent, ply, treadseq, bombseq)
+		local par = ent:GetParent()
+		if !IsValid(par) or !ent.IsPhysified or par:GetClass() != "animprop_generic_physmodel" or par.ConfirmationID != ent.ConfirmationID then par = nil end
+		local animprop = ConvertEntityToAnimprop(ent, ply, true, false)
+		if IsValid(animprop) then
+			//Create more animprops for the detail parts
+			local function CreateDetailAnimprop(model, seqstr, fallbackpos)
+				local dummy = ents.Create("prop_dynamic")
+				if !IsValid(dummy) then return end
+				dummy:SetPos(animprop:GetPos())
+				dummy:SetAngles(animprop:GetAngles())
+				dummy:SetModel(model)
+				local animprop2 = ConvertEntityToAnimprop(dummy, ply, true, true)
+				if !IsValid(animprop2) then dummy:Remove() return end
+				animprop2:SetChannel1Sequence(animprop2:LookupSequence(seqstr))
+
+				if CreateAdvBonemergeEntity then
+					//Attach the parts with adv bonemerge tool
+					//animprop2.IsAdvBonemerged = true
+					animprop2 = CreateAdvBonemergeEntity(animprop2, animprop, ply, false, false, true)
+					//MsgN(animprop2.IsAdvBonemerged)
+					constraint.AdvBoneMerge(animprop, animprop2, ply)
+					animprop2.AdvBone_BoneInfo_IsDefault = false
+					animprop2:UpdateAnimpropPhysics()
+				else
+					//If the adv bonemerge addon isn't installed, then weld the parts as a fallback
+					animprop2:SetPhysicsMode(2) //use effect physics
+					animprop2:UpdateAnimpropPhysics() //update the physics immediately so we can weld it
+					animprop2:SetCollisionGroup(COLLISION_GROUP_WORLD) //make sure we don't push anything away now that we're physical
+					local phys = animprop2:GetPhysicsObject()
+					//if IsValid(phys) then phys:EnableMotion(false) end //also make sure we don't get pushed away by the world if we're flush against it
+					animprop2:SetPos(LocalToWorld(fallbackpos, Angle(), animprop:GetPos(), animprop:GetAngles()))
+					animprop2:SetAngles(animprop:GetAngles())
+					constraint.Weld(animprop, animprop2, 0, 0, 0, true, false)
+				end
+			end
+			CreateDetailAnimprop("models/bots/boss_bot/bomb_mechanism.mdl", bombseq, vector_origin)
+			CreateDetailAnimprop("models/bots/boss_bot/tank_track_l.mdl", treadseq, Vector(0,56,0))
+			CreateDetailAnimprop("models/bots/boss_bot/tank_track_r.mdl", treadseq, Vector(0,-56,0))
+
+			//Physics; do this after CreateDetailAnimprop to prevent weird physics interaction
+			if par then
+				//animprop:SetPhysicsMode(0) //use prop physics (or box physics for non-props)
+				//animprop:UpdateAnimpropPhysics() //update the physics immediately so we can freeze it
+				//Freeze the animprop if the old ent's physmodel was frozen
+				if IsValid(animprop:GetPhysicsObject()) and IsValid(par:GetPhysicsObject()) and !par:GetPhysicsObject():IsMotionEnabled() then
+					animprop:GetPhysicsObject():EnableMotion(false)
+				end
+				//The old ent gives animprops physics by parenting them to a separate physmodel entity.
+				//Grab the constraints from the parent and transfer them over to the new prop.
+				for k, const in pairs (table.Copy(constraint.GetTable(par))) do
+					if const.Entity then
+						//If any of the values in the constraint table are the physmodel, switch them over to the animprop
+						for key, val in pairs (const) do
+							if type(val) == "Entity" then
+								if key == par then const[key] = animprop end
+							end
+						end
+
+						local entstab = {}
+
+						//Also switch over any instances of physmodel to animprop inside the entity subtable
+						for tabnum, tab in pairs (const.Entity) do
+							if tab.Entity == par then
+								const.Entity[tabnum].Entity = animprop
+								const.Entity[tabnum].Index = animprop:EntIndex()
+							end
+							entstab[const.Entity[tabnum].Index] = const.Entity[tabnum].Entity
+						end
+
+						duplicator.CreateConstraintFromTable(table.Copy(const), table.Copy(entstab))
+					end
+				end
+			end
 		end
+		return IsValid(animprop)
+	end,
+	animprop_spawntank = function(ent, ply) return conversion_funcs["_animprop_spawntank_"](ent, ply, "ref", "ref") end,
+	animprop_spawntank_deploy = function(ent, ply) return conversion_funcs["_animprop_spawntank_"](ent, ply, "ref", "deploy") end,
+	animprop_spawntank_moving = function(ent, ply) return conversion_funcs["_animprop_spawntank_"](ent, ply, "forward", "ref") end,
+}
 
-		local genericparticletable = { 
-			RepeatRate = 0, 
-			RepeatSafety = 1, 
-
-			Toggle = 1, 
-			StartOn = 1, 
-			NumpadKey = 0, 
-
-			UtilEffectInfo = Vector(1,1,1), 
-			ColorInfo = Color(1,1,1,1) 
-		}
-
-		//Charged effect
-		local tab = table.Copy(genericparticletable)
-		tab.EffectName = "teleporter_" .. team .. "_charged_level" .. level
-		tab.AttachNum = 0
-		AttachParticleControllerNormal(ply, animprop, {NewTable = tab})
-
-		//Direction effect
-		local tab = table.Copy(genericparticletable)
-		tab.EffectName = "teleporter_" .. team .. "_" .. entrance .. "_level" .. level
-		tab.AttachNum = 0
-		AttachParticleControllerNormal(ply, animprop, {NewTable = tab})
-
-		//Arm effect 1 (apparently teleporters have these at all times. why not?)
-		local tab = table.Copy(genericparticletable)
-		tab.EffectName = "teleporter_arms_circle_" .. team
-		tab.AttachNum = 1
-		AttachParticleControllerNormal(ply, animprop, {NewTable = tab})
-		//Arm effect 2
-		local tab = table.Copy(genericparticletable)
-		tab.EffectName = "teleporter_arms_circle_" .. team
-		tab.AttachNum = 3
-		AttachParticleControllerNormal(ply, animprop, {NewTable = tab})
-	end
-
-	return animprop
-
+local function UpdateOldProp(ent, ply)
+	if CLIENT then return end
+	if !IsValid(ent) then return nil end
+	if conversion_funcs[ent:GetClass()] then return conversion_funcs[ent:GetClass()](ent, ply) end
 end
 
-duplicator.RegisterEntityClass("animprop_spawnentrance_blue", function(ply, data)
-	return SpawnTeleporter(ply, data, 1, 1, true)
-end, "Data")
+properties.Add("animprop_backcomp", {
+	MenuLabel = "Convert old Animated Prop to new addon",
+	Order = 1599,
+	PrependSpacer = false,
+	MenuIcon = "icon16/film_add.png",
 
-duplicator.RegisterEntityClass("animprop_spawnentrance_blue3", function(ply, data)
-	return SpawnTeleporter(ply, data, 1, 3, true)
-end, "Data")
+	Filter = function(self, ent, ply)
 
-duplicator.RegisterEntityClass("animprop_spawnentrance_red", function(ply, data)
-	return SpawnTeleporter(ply, data, 0, 1, true)
-end, "Data")
+		if !IsValid(ent) then return false end
+		if !gamemode.Call("CanProperty", ply, "animprop_backcomp", ent) then return false end
 
-duplicator.RegisterEntityClass("animprop_spawnentrance_red3", function(ply, data)
-	return SpawnTeleporter(ply, data, 0, 3, true)
-end, "Data")
-
-duplicator.RegisterEntityClass("animprop_spawnexit_blue", function(ply, data)
-	return SpawnTeleporter(ply, data, 1, 1, false)
-end, "Data")
-
-duplicator.RegisterEntityClass("animprop_spawnexit_blue3", function(ply, data)
-	return SpawnTeleporter(ply, data, 1, 3, false)
-end, "Data")
-
-duplicator.RegisterEntityClass("animprop_spawnexit_red", function(ply, data)
-	return SpawnTeleporter(ply, data, 0, 1, false)
-end, "Data")
-
-duplicator.RegisterEntityClass("animprop_spawnexit_red3", function(ply, data)
-	return SpawnTeleporter(ply, data, 0, 3, false)
-end, "Data")
-
-local function SpawnMiniSentry(ply, data, team)
-
-	data.Model = "models/buildables/sentry1.mdl"
-	data.Skin = team + 2
-
-	//Create a dummy entity with the data table and convert it into an animprop
-	data.Class = "base_gmodentity"
-	data.PhysicsObjects = nil //don't copy this, it'll break stuff
-	local EntityMods = data.EntityMods //the duplicator will apply entitymods to the new animprop after this function finishes; don't pre-apply them to the dummy, or they'll get applied twice
-	local BoneMods = data.BoneMods //this too
-	data.EntityMods = nil
-	data.BoneMods = nil
-	local dummy = duplicator.GenericDuplicatorFunction(ply, data)
-	data.EntityMods = EntityMods
-	data.BoneMods = BoneMods
-	if !IsValid(dummy) then return end
-	local animprop = ConvertEntityToAnimprop(dummy, ply, true, true)
-	if !IsValid(animprop) then dummy:Remove() return end
-
-	local phys = animprop:GetPhysicsObject()
-	if IsValid(phys) then phys:EnableMotion(false) end
-
-	animprop:SetModelScale(0.75)
-	animprop:SetBodygroup(2,1) //light
-
-	//Add particle effects with adv particle controller
-	if AttachParticleControllerNormal then
-		if team == 0 then
-			team = "_red"
+		if conversion_funcs[ent:GetClass()] then
+			return true
 		else
-			team = ""
+			local function CheckForChildProps(ent2)
+				for _, v in pairs (ent2:GetChildren()) do
+					if conversion_funcs[v:GetClass()] then
+						return true
+					else
+						local val = CheckForChildProps(v)
+						if val then return val end
+					end
+				end
+			end
+			return CheckForChildProps(ent)
 		end
 
-		//Light effect
-		AttachParticleControllerNormal(ply, animprop, {NewTable = {
-			EffectName = "cart_flashinglight" .. team,
-			AttachNum = 3,
+	end,
 
-			RepeatRate = 0, 
-			RepeatSafety = 1, 
+	Action = function(self, ent)
 
-			Toggle = 1, 
-			StartOn = 1, 
-			NumpadKey = 0, 
+		self:MsgStart()
+			net.WriteEntity(ent)
+		self:MsgEnd()
 
-			UtilEffectInfo = Vector(1,1,1),
-			ColorInfo = Color(1,1,1,1)
-		}})
+	end,
+
+	Receive = function(self, length, ply)
+
+		local ent = net.ReadEntity()
+		if !IsValid(ent) or !IsValid(ply) or !properties.CanBeTargeted(ent, ply) or !self:Filter(ent, ply) then return end
+
+		local results = {}
+		local result = UpdateOldProp(ent, ply)
+		if isbool(result) then
+			results[result] = (results[result] or 0) + 1
+		else
+			local function CheckForChildProps(ent2)
+				for _, v in pairs (ent2:GetChildren()) do
+					local result = UpdateOldProp(v, ply)
+					if isbool(result) then
+						results[result] = (results[result] or 0) + 1
+					else
+						CheckForChildProps(v)
+					end
+				end
+			end
+			CheckForChildProps(ent)
+		end
+		//Show on-screen notifications for all props we converted or failed to convert
+		ply:SendLua("surface.PlaySound('common/wpn_select.wav')")
+		if results[true] then
+			MsgN("Successfully converted " .. results[true] .. " prop(s)!")
+			ply:SendLua("GAMEMODE:AddNotify('Successfully converted " .. results[true] .. " prop(s)!', NOTIFY_GENERIC, 4)")
+			ply:SendLua("surface.PlaySound('ambient/water/drip" .. math.random(1, 4) .. ".wav')")
+		end
+		if results[false] then
+			MsgN("Failed to convert " .. results[false] .. " prop(s)!")
+			ply:SendLua("GAMEMODE:AddNotify('Failed to convert " .. results[false] .. " prop(s)!', NOTIFY_ERROR, 4)")
+			ply:SendLua("surface.PlaySound('buttons/button11.wav')")
+		end
+
 	end
+})
 
-	return animprop
-
+if SERVER then
+	concommand.Add("sv_animprop_backcomp_convert_all", function(ply, cmd, args)
+		//Only let server owners run this command because it converts everyone's spawned ents
+		if !game.SinglePlayer() and IsValid(ply) and !ply:IsListenServerHost() and !ply:IsSuperAdmin() then
+			return false
+		end
+		local results = {}
+		for _, ent in pairs (ents.GetAll()) do
+			local result = UpdateOldProp(ent, ply)
+			if isbool(result) then
+				results[result] = (results[result] or 0) + 1
+			end
+		end
+		//Show on-screen notifications for all fx we converted or failed to convert
+		ply:SendLua("surface.PlaySound('common/wpn_select.wav')")
+		if results[true] then
+			MsgN("Successfully converted " .. results[true] .. " prop(s)!")
+			ply:SendLua("GAMEMODE:AddNotify('Successfully converted " .. results[true] .. " prop(s)!', NOTIFY_GENERIC, 4)")
+			ply:SendLua("surface.PlaySound('ambient/water/drip" .. math.random(1, 4) .. ".wav')")
+		end
+		if results[false] then
+			MsgN("Failed to convert " .. results[false] .. " prop(s)!")
+			ply:SendLua("GAMEMODE:AddNotify('Failed to convert " .. results[false] .. " prop(s)!', NOTIFY_ERROR, 4)")
+			ply:SendLua("surface.PlaySound('buttons/button11.wav')")
+		end
+	end, nil, "Update all old Animated Props on the map to the new addon")
 end
-
-duplicator.RegisterEntityClass("animprop_spawnminisentry_blue", function(ply, data)
-	return SpawnMiniSentry(ply, data, 1)
-end, "Data")
-
-duplicator.RegisterEntityClass("animprop_spawnminisentry_red", function(ply, data)
-	return SpawnMiniSentry(ply, data, 0)
-end, "Data")
-
-local function SpawnTank(ply, data, bodyseq, treadseq, bombseq)
-
-	//data.Model = "models/bots/boss_bot/boss_tank.mdl" //this pre-made prop actually had an editable model and skin so players could use damaged tank models or the final tank skin
-
-	//Create a dummy entity with the data table and convert it into an animprop
-	data.Class = "base_gmodentity"
-	data.PhysicsObjects = nil //don't copy this, it'll break stuff
-	local EntityMods = data.EntityMods //the duplicator will apply entitymods to the new animprop after this function finishes; don't pre-apply them to the dummy, or they'll get applied twice
-	local BoneMods = data.BoneMods //this too
-	data.EntityMods = nil
-	data.BoneMods = nil
-	local dummy = duplicator.GenericDuplicatorFunction(ply, data)
-	data.EntityMods = EntityMods
-	data.BoneMods = BoneMods
-	if !IsValid(dummy) then return end
-	local animprop = ConvertEntityToAnimprop(dummy, ply, true, true)
-	if !IsValid(animprop) then dummy:Remove() return end
-
-	animprop:SetChannel1Sequence(animprop:LookupSequence(bodyseq))
-	animprop:SetPhysicsMode(0) //use prop physics
-	if data.IsPhysified and data.ConfirmationID then
-		animprop.ConfirmationID = data.ConfirmationID  //this was used by the "physmodel" entity to associate itself with the animprop - we don't need a separate entity 
-	end
-
-	//Create more animprops for the detail parts
-	local function CreateDetailAnimprop(model, seqstr)
-		local dummy2 = ents.Create("prop_dynamic")
-		if !IsValid(dummy2) then return end
-		dummy2:SetPos(animprop:GetPos())
-		dummy2:SetAngles(animprop:GetAngles())
-		dummy2:SetModel(model)
-		local animprop2 = ConvertEntityToAnimprop(dummy2, ply, true, true)
-		if !IsValid(animprop2) then dummy2:Remove() return end
-		animprop2:SetChannel1Sequence(animprop2:LookupSequence(seqstr))
-
-		return animprop2
-	end
-	local animprop2 = CreateDetailAnimprop("models/bots/boss_bot/bomb_mechanism.mdl", bombseq)
-	local animprop3 = CreateDetailAnimprop("models/bots/boss_bot/tank_track_l.mdl", treadseq)
-	local animprop4 = CreateDetailAnimprop("models/bots/boss_bot/tank_track_r.mdl", treadseq)
-	if !IsValid(animprop2) or !IsValid(animprop3) or !IsValid(animprop4) then return end
-
-	if CreateAdvBonemergeEntity then
-		//Attach the parts with adv bonemerge tool
-		local function DoAdvBonemerge(ent)
-			ent = CreateAdvBonemergeEntity(ent, animprop, ply, false, false, true)
-			constraint.AdvBoneMerge(animprop, ent, ply)
-			ent.AdvBone_BoneInfo_IsDefault = false
-		end
-		DoAdvBonemerge(animprop2)
-		DoAdvBonemerge(animprop3)
-		DoAdvBonemerge(animprop4)
-	else
-		//If the adv bonemerge addon isn't installed, then weld the parts as a fallback
-		local function DoFallback(ent, posoffset)
-			ent:SetPos(LocalToWorld(posoffset, Angle(), animprop:GetPos(), animprop:GetAngles()))
-			ent:SetAngles(animprop:GetAngles())
-			constraint.Weld(animprop, ent, 0, 0, 0, true, false)
-		end
-		DoFallback(animprop2, vector_origin)
-		DoFallback(animprop3, Vector(0,56,0))
-		DoFallback(animprop4, Vector(0,-56,0))
-	end
-
-	return animprop
-
-end
-
-duplicator.RegisterEntityClass("animprop_spawntank", function(ply, data)
-	return SpawnTank(ply, data, "movement", "ref", "ref")
-end, "Data")
-
-duplicator.RegisterEntityClass("animprop_spawntank_deploy", function(ply, data)
-	return SpawnTank(ply, data, "deploy", "ref", "deploy")
-end, "Data")
-
-duplicator.RegisterEntityClass("animprop_spawntank_moving", function(ply, data)
-	return SpawnTank(ply, data, "movement", "forward", "ref")
-end, "Data")

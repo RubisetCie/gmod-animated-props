@@ -1000,9 +1000,9 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 				//pause:SetToggle(true)
 			else
 				local seq = animent["GetChannel" .. i .. "Sequence"](animent)
-				if !(seq <= 0)								//not an invalid animation
-				and animent:SequenceDuration(seq) > 0					//not a single-frame animation
-				and (!pnldisabled or !pnldisabled.NumpadIsDisabling) then		//not disabled by numpad
+				if !(seq < 0)							//not an invalid animation
+				and animent:SequenceDuration(seq) > 0.034			//not a single-frame animation
+				and (!pnldisabled or !pnldisabled.NumpadIsDisabling) then	//not disabled by numpad
 					local cycle = nil
 					if i == 1 then
 						cycle = animent:GetCycle()
@@ -1485,37 +1485,64 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 	if IsValid(ent2) then
 
-		local function SendRemapInfoToServer()
-			local entbone = back.BoneList.selectedbone
+		local function SendRemapInfoToServer(which)
+			local boneids = back.BoneList:GetSelected()
 
-			local newtargetbone = back.TargetBoneList.selectedtargetbone
-			local newang = Angle( back.slider_ang_p:GetValue(), back.slider_ang_y:GetValue(), back.slider_ang_r:GetValue() )
+			local whichtab = {
+				[back.TargetBoneList] = 0,
+				[back.slider_ang_p] = 1,
+				[back.slider_ang_y] = 2,
+				[back.slider_ang_r] = 3,
+			}
+			if whichtab[which] == nil then return end
 
-			//First, apply the new RemapInfo clientside
-			if !back.BoneList.UpdatingRemapOptions then
-				if newtargetbone != -1 then
-					ent.RemapInfo[entbone]["parent"] = ent2:GetBoneName(newtargetbone)
-				else
-					ent.RemapInfo[entbone]["parent"] = ""
+			if back.BoneList.UpdatingRemapOptions or #boneids == 0 then return end
+
+			//Send all of the information to the server so the duplicator can pick it up
+			net.Start("AnimProp_RemapInfoFromEditor_SendToSv")
+				net.WriteEntity(ent)
+				net.WriteInt(#boneids, 9)
+				for k, line in pairs (boneids) do
+					net.WriteInt(line.id, 9)
 				end
+				net.WriteUInt(whichtab[which], 2)
 
-				ent.RemapInfo[entbone]["ang"] = newang
+				if which == back.TargetBoneList then
+					local newtargetbone = back.TargetBoneList.selectedtargetbone
+					//First, apply the new RemapInfo clientside
+					if ent.RemapInfo and newtargetbone != -2 then
+						for k, line in pairs (boneids) do
+							if ent.RemapInfo[line.id] then
+								if newtargetbone != -1 then
+									ent.RemapInfo[line.id].parent = ent2:GetBoneName(newtargetbone)
+								else
+									ent.RemapInfo[line.id].parent = ""
+								end
+							end
+						end
+					end
+					//Then send the new value to the server
+					net.WriteInt(newtargetbone, 9)
+				else
+					//The rest are all angle sliders
+					local val = which:GetValue()
+					//First, apply the new RemapInfo clientside
+					if ent.RemapInfo then
+						for k, line in pairs (boneids) do
+							if ent.RemapInfo[line.id] then
+								ent.RemapInfo[line.id].ang[whichtab[which]] = val
+							end
+						end
+					end
+					//Then send the new value to the server
+					net.WriteFloat(val)
+				end
+				net.WriteBool(engine.IsRecordingDemo())
 
 				//Wake up BuildBonePositions and get it to use the new info
 				ent.RemapInfo_RemapAngOffsets = nil
 				ent.LastBoneChangeTime = CurTime()
-
-				//Then, send all of the information to the server so the duplicator can pick it up
-				net.Start("AnimProp_RemapInfoFromEditor_SendToSv")
-					net.WriteEntity(ent)
-					net.WriteInt(entbone, 9)
-
-					net.WriteInt(newtargetbone, 9)
-					net.WriteAngle(newang)
-
-					net.WriteBool(engine.IsRecordingDemo())
-				net.SendToServer()
-			end
+			net.SendToServer()
 		end
 
 		local lpnl = vgui.Create("Panel", back)
@@ -1526,72 +1553,128 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 		back.BoneList = list
 		list:AddColumn("Bone (" .. string.GetFileFromFilename(ent:GetModel()) .. ")")
 		list:Dock(FILL)
-		list:SetMultiSelect(false)
-
-		ent:SetupBones()
-		ent:InvalidateBoneCache()
-
 		list.Bones = {}
-		list.selectedbone = 0
-		for id = 0, ent:GetBoneCount() do
-			if ent:GetBoneName(id) != "__INVALIDBONE__" then
-				local line = list:AddLine(ent:GetBoneName(id))
+
+		local cv_linkicons = GetConVar("cl_animprop_editor_bone_linkicons")
+
+		list.PopulateBoneList = function()
+
+			list:Clear()
+			list:ClearSelection() //TODO: is this unnecessary?
+			list:SetMultiSelect(GetConVar("cl_animprop_editor_bone_multiselect"):GetBool())
+
+			ent:SetupBones()
+			ent:InvalidateBoneCache()
+
+			list.Bones = {}
+
+			local function AddBone(name, id)
+				local line = list:AddLine(name)
 				list.Bones[id] = line
+				line.id = id
+				line.AnimProp_BoneHoverData = { //info for on-hover check in HUDPaint
+					id = id,
+					ent = ent
+				}
+				line:SetTooltip(string.TrimLeft(name))
+				line:SetTooltipDelay(0)
 
 				local selectedtargetbone = -1
 				if ent.RemapInfo and ent.RemapInfo[id] then
-					local targetbonestr = ent.RemapInfo[id]["parent"]
+					local targetbonestr = ent.RemapInfo[id].parent
 					if targetbonestr != "" then selectedtargetbone = ent2:LookupBone(targetbonestr) end
 				end
 				if selectedtargetbone != -1 then line.HasTargetBone = true end
 
-				line.OnSelect = function()
-					list.selectedbone = id
-					list.UpdateRemapOptions(id)
-				end
-
-				//Select bone 0 by default
-				if id == 0 then
-					line:SetSelected(true) //TODO: what if bone 0 is invalid somehow?
-				end
-
 				line.Paint = function(self, w, h)
 					derma.SkinHook("Paint", "ListViewLine", self, w, h)
 					if line.HasTargetBone then
-						if self.Icon then
-							self.Icon:SetImage("icon16/tick.png")
-						end
+						AnimProp_BoneList_IconTick = AnimProp_BoneList_IconTick or Material("icon16/tick.png")
+						icon = AnimProp_BoneList_IconTick
 						surface.SetDrawColor(0,255,0,35)
 					else
-						if self.Icon then
-							self.Icon:SetImage("icon16/cross.png")
-						end
+						AnimProp_BoneList_IconCross = AnimProp_BoneList_IconCross or Material("icon16/cross.png")
+						icon = AnimProp_BoneList_IconCross
 						surface.SetDrawColor(255,0,0,35)
 					end
-						surface.DrawRect(0, 0, w, h)
+					surface.DrawRect(0, 0, w, h)
+					if cv_linkicons:GetBool() then //these are mostly unnecessary because the line is already colored red/green, but could be useful for colorblindness i suppose, so gate them behind a convar
+						surface.SetDrawColor(255,255,255,255)
+						surface.SetMaterial(icon)
+						local x = w - 16
+						if list.VBar.Enabled then x = x - list.VBar:GetWide() end
+						surface.DrawTexturedRect(x, (h-16)/2, 16, 16)
+						surface.SetDrawColor(255,255,255,(255*0.75))
+						AnimProp_BoneList_IconLink = AnimProp_BoneList_IconLink or Material("icon16/link.png")
+						surface.SetMaterial(AnimProp_BoneList_IconLink)
+						surface.DrawTexturedRect(x, (h-16)/2, 16, 16)
+					end
 				end
-
-				local img = vgui.Create("DImage", line)
-				line.Icon = img
-				img:SetImage("icon16/cross.png")
-				img:SizeToContents()
-				img:Dock(RIGHT)
-				img:DockMargin(0,0,list.VBar:GetWide(),0) //not worth the trouble making this adjust for whether the vbar is visible or not
-
-				local img = vgui.Create("DImage", line)
-				line.Icon2 = img
-				img:SetImage("icon16/link.png")
-				img:SizeToContents()
-				img:Dock(RIGHT)
 			end
+
+			if !GetConVar("cl_animprop_editor_bone_hierarchyview"):GetBool() then
+				for id = 0, ent:GetBoneCount() do
+					local name = ent:GetBoneName(id)
+					if name != "__INVALIDBONE__" then
+						if GetConVar("cl_animprop_editor_bone_ids"):GetBool() then name = id .. ": " .. name end
+						AddBone(name, id)
+					end
+				end
+			else
+				local function AddBonesInHierarchy(id, lvl)
+					local indent = ""
+					for i = 1, lvl do
+						indent = indent .. "  "
+					end
+					local name = ent:GetBoneName(id)
+					if name != "__INVALIDBONE__" then
+						if GetConVar("cl_animprop_editor_bone_ids"):GetBool() then name = id .. ": " .. name end
+						AddBone(indent .. name, id)
+
+						for _, v in ipairs (ent:GetChildBones(id)) do
+							AddBonesInHierarchy(v, lvl + 1)
+						end
+					end
+				end
+				for id = 0, ent:GetBoneCount() - 1 do
+					local id2 = ent:GetBoneParent(id) 
+					if id2 == nil or id2 < 0 then
+						AddBonesInHierarchy(id, 0)
+					end
+				end
+			end
+
+			list:SelectFirstItem()
+			list.UpdateRemapOptions()
+
+			//indents and id numbers both completely break alphabetical sorting; this wasn't even 
+			//an intended feature at all, but i'm not turning it off completely because you just 
+			//know there's *someone* out there who's made it an integral part of their workflow.
+			list:SetSortable(!GetConVar("cl_animprop_editor_bone_hierarchyview"):GetBool() and !GetConVar("cl_animprop_editor_bone_ids"):GetBool())
+		
+		end
+
+		list.OnRowSelected = function()
+			list.UpdateRemapOptions()
 		end
 
 		list.UpdatingRemapOptions = false
-		list.UpdateRemapOptions = function(boneid)
+		list.UpdateRemapOptions = function()
 			//Don't let the options accidentally update anything while we're changing their values like this
 			list.UpdatingRemapOptions = true
 
-			local ang = ent.RemapInfo[boneid]["ang"]
+			local boneids = back.BoneList:GetSelected()
+			//MsgN("running UpdateRemapOptions with selected bones: ")
+			//PrintTable(boneids)
+
+			local ang, ang_conflict_p, ang_conflict_y, ang_conflict_r
+			for k, line in pairs (boneids) do
+				local this_ang = ent.RemapInfo[line.id].ang
+				ang = ang or this_ang
+				if ang.p != this_ang.p then ang_conflict_p = true end
+				if ang.y != this_ang.y then ang_conflict_y = true end
+				if ang.r != this_ang.r then ang_conflict_r = true end
+			end
 
 			//if the keyboard focus is on a slider's text field when we update the slider's value, then the text value won't update correctly,
 			//so make sure to take the focus off of the text fields first
@@ -1603,20 +1686,26 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			back.slider_ang_y:SetValue(ang.y)
 			back.slider_ang_r:SetValue(ang.r)
 
-			//taking the focus off of the text areas isn't enough, we also need to update their text manually because vgui.GetKeyboardFocus()
-			//erroneously tells them that they've still got focus and shouldn't be updating themselves
-			back.slider_ang_p.TextArea:SetText( back.slider_ang_p.Scratch:GetTextValue() )
-			back.slider_ang_y.TextArea:SetText( back.slider_ang_y.Scratch:GetTextValue() )
-			back.slider_ang_r.TextArea:SetText( back.slider_ang_r.Scratch:GetTextValue() )
-
-			local bonename = ent.RemapInfo[boneid]["parent"]
-			if ent2:LookupBone(bonename) then
-				back.TargetBoneList:SetValue(bonename)
-				back.TargetBoneList.selectedtargetbone = ent2:LookupBone(bonename)
+			if !ang_conflict_p then
+				//taking the focus off of the text areas isn't enough, we also need to update their text manually because vgui.GetKeyboardFocus()
+				//erroneously tells them that they've still got focus and shouldn't be updating themselves
+				back.slider_ang_p.TextArea:SetText(back.slider_ang_p.Scratch:GetTextValue())
 			else
-				back.TargetBoneList:SetValue("(none)")
-				back.TargetBoneList.selectedtargetbone = -1
+				//we've selected multiple bones with conflicting values, don't show any number until this changes
+				back.slider_ang_p.TextArea:SetText("")
 			end
+			if !ang_conflict_y then
+				back.slider_ang_y.TextArea:SetText(back.slider_ang_y.Scratch:GetTextValue())
+			else
+				back.slider_ang_y.TextArea:SetText("")
+			end
+			if !ang_conflict_r then
+				back.slider_ang_r.TextArea:SetText(back.slider_ang_r.Scratch:GetTextValue())
+			else
+				back.slider_ang_r.TextArea:SetText("")
+			end
+
+			back.TargetBoneList.PopulateTargetBoneList()
 
 			list.UpdatingRemapOptions = false
 		end
@@ -1651,7 +1740,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			text:SetWrap(true)
 			text:SetTextInset(0, 0)
 			//text:SetText("To set up remapping, use the angle options above to make the prop's default pose match the puppeteer's default pose as closely as possible, and then make sure the bones you want to animate have target bones set (green checkmarks).")
-			text:SetText("To set up remapping, both models' default poses need to match as closely as possible. To adjust the pose, select a bone in the list to the left, and then use the angle options below to rotate it.")
+			text:SetText("To set up remapping, both models' default poses need to match as closely as possible. To adjust the pose, select bones in the list to the left, and then use the angle options below to rotate them.")
 			text:SetContentAlignment(5)
 			text:SetAutoStretchVertical(true)
 			text:DockMargin(padding,padding-3,padding,0) //-3 height on text because it has a little extra bloat on top
@@ -1672,31 +1761,86 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 			drop.Combo = vgui.Create("DComboBox", drop)
 			back.TargetBoneList = drop.Combo
-			
 			drop.Combo:SetHeight(25)
 			drop.Combo:Dock(FILL)
 
-			ent2:SetupBones()
-			ent2:InvalidateBoneCache()
+			back.TargetBoneList.PopulateTargetBoneList = function()
 
-			drop.Combo:AddChoice("(none)", -1)
-			for id = 0, ent2:GetBoneCount() do
-				if ent2:GetBoneName(id) != "__INVALIDBONE__" then
-					drop.Combo:AddChoice(ent2:GetBoneName(id), id)
+				local boneids = back.BoneList:GetSelected()
+				back.TargetBoneList:Clear()
+
+				ent2:SetupBones()
+				ent2:InvalidateBoneCache()
+
+				local selectedtargetbone
+				for k, line in pairs (boneids) do
+					local this_targetbone = ent.RemapInfo[line.id].parent
+					if this_targetbone != "" and IsValid(ent2) then 
+						this_targetbone = ent2:LookupBone(this_targetbone)
+					else
+						this_targetbone = -1
+					end
+					selectedtargetbone = selectedtargetbone or this_targetbone
+					if selectedtargetbone != this_targetbone then
+						selectedtargetbone = -2
+						break
+					end
 				end
+				selectedtargetbone = selectedtargetbone or -2
+				back.TargetBoneList.selectedtargetbone = selectedtargetbone
+
+				drop.Combo:AddChoice("(none)", -1, (selectedtargetbone == -1))
+				if !GetConVar("cl_animprop_editor_bone_hierarchyview"):GetBool() then
+					for id = 0, ent2:GetBoneCount() - 1 do
+						local name = ent2:GetBoneName(id)
+						if name != "__INVALIDBONE__" then
+							if GetConVar("cl_animprop_editor_bone_ids"):GetBool() then name = id .. ": " .. name end
+							drop.Combo:AddChoice(name, id, (selectedtargetbone == id))
+						end
+					end
+				else
+					local function AddBonesInHierarchy(id, lvl)
+						local indent = ""
+						for i = 1, lvl do
+							indent = indent .. "  "
+						end
+						local name = ent2:GetBoneName(id)
+						if name != "__INVALIDBONE__" then
+							if GetConVar("cl_animprop_editor_bone_ids"):GetBool() then name = id .. ": " .. name end
+							drop.Combo:AddChoice(indent .. name, id, (selectedtargetbone == id))
+
+							for _, v in ipairs (ent2:GetChildBones(id)) do
+								AddBonesInHierarchy(v, lvl + 1)
+							end
+						end
+					end
+					for id = 0, ent2:GetBoneCount() - 1 do
+						local id2 = ent2:GetBoneParent(id) 
+						if id2 == nil or id2 < 0 then
+							AddBonesInHierarchy(id, 0)
+						end
+					end
+				end
+
 			end
 
 			drop.Combo.OnSelect = function(_,_,value,data)
 				drop.Combo.selectedtargetbone = data
-				SendRemapInfoToServer()
+				SendRemapInfoToServer(back.TargetBoneList)
 
-				//Update visuals of list entry for this bone
-				if back.BoneList.Bones[back.BoneList.selectedbone] then
-					back.BoneList.Bones[back.BoneList.selectedbone].HasTargetBone = data != -1
+				//Update visuals of list entries to show their new status
+				for k, line in pairs (back.BoneList:GetSelected()) do
+					if back.BoneList.Bones[line.id] then
+						back.BoneList.Bones[line.id].HasTargetBone = data != -1
+					end
 				end
-			end
 
-			//Modified OpenMenu fuction to display menu items in bone ID (data value) order
+				//Don't show indents in selected bone name
+				drop.Combo:SetText(string.TrimLeft(value))
+			end
+			drop.Combo:SetSortItems(false)
+
+			//Modified OpenMenu fuction to check the currently selected bone
 			drop.Combo.OpenMenu = function(self, pControlOpener)
 				if ( pControlOpener && pControlOpener == self.TextEntry ) then
 					return
@@ -1714,9 +1858,17 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 				self.Menu = DermaMenu( false, self )
 
-				for k, v in SortedPairs( self.Choices ) do
+				//only this block is meaningfully changed
+				for k, v in pairs( self.Choices ) do
 					local option = self.Menu:AddOption( v, function() self:ChooseOption( v, k ) end )
-					if back.TargetBoneList.selectedtargetbone == (k - 2) then option:SetChecked(true) end  //check the currently selected target bone
+					if back.TargetBoneList.selectedtargetbone == self.Data[k] then option:SetChecked(true) end  //check the currently selected target bone
+
+					if self.Data[k] >= 0 then //don't show for "(none)" option
+						option.AnimProp_BoneHoverData = { //info for on-hover check in HUDPaint
+							id = self.Data[k],
+							ent = ent2
+						}
+					end
 				end
 
 				local x, y = self:LocalToScreen( 0, self:GetTall() )
@@ -1749,34 +1901,37 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			slider:SetText("Angle Pitch")
 			slider:SetMinMax(-180, 180)
 			slider:SetDefaultValue(0.00)
+			slider:SetDecimals(3)
 			slider:SetDark(true)
 			slider:SetHeight(18)//(9)
 			slider:Dock(TOP)
 			slider:DockMargin(padding,betweenitems,0,0)
-			slider.OnValueChanged = function() SendRemapInfoToServer() end
 			back.slider_ang_p = slider
+			slider.OnValueChanged = function() SendRemapInfoToServer(back.slider_ang_p) end
 
 			local slider = vgui.Create("DNumSlider", rpnl)
 			slider:SetText("Angle Yaw")
 			slider:SetMinMax(-180, 180)
 			slider:SetDefaultValue(0.00)
+			slider:SetDecimals(3)
 			slider:SetDark(true)
 			slider:SetHeight(18)//(9)
 			slider:Dock(TOP)
 			slider:DockMargin(padding,betweenitems-5,0,0)
-			slider.OnValueChanged = function() SendRemapInfoToServer() end
 			back.slider_ang_y = slider
+			slider.OnValueChanged = function() SendRemapInfoToServer(back.slider_ang_y) end
 
 			local slider = vgui.Create("DNumSlider", rpnl)
 			slider:SetText("Angle Roll")
 			slider:SetMinMax(-180, 180)
 			slider:SetDefaultValue(0.00)
+			slider:SetDecimals(3)
 			slider:SetDark(true)
 			slider:SetHeight(18)//(9)
 			slider:Dock(TOP)
 			slider:DockMargin(padding,betweenitems-5,0,3)
-			slider.OnValueChanged = function() SendRemapInfoToServer() end
 			back.slider_ang_r = slider
+			slider.OnValueChanged = function() SendRemapInfoToServer(back.slider_ang_r) end
 
 			local help = vgui.Create("DLabel", rpnl)
 			help:SetDark(true)
@@ -1884,13 +2039,67 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			help:SetDark(true)
 			help:SetWrap(true)
 			help:SetTextInset(0, 0)
-			help:SetText("These options are purely visual and won't affect remapping.") //bad wording
+			help:SetText("These options are only for previewing the puppeteer, and won't affect the animation.")
 			help:SetContentAlignment(5)
 			help:SetAutoStretchVertical(true)
 			//help:DockMargin(32,0,32,8)
 			help:DockMargin(padding_help,betweenitems_help,padding_help,0)
 			help:Dock(TOP)
 			help:SetTextColor(color_helpdark)
+
+			local function BonelistUpdateAppearance()
+				//Compile a list of all currently selected bones that will persist after the update
+				local tab = {}
+				for k, line in pairs (back.BoneList:GetSelected()) do
+					tab[line.id] = true
+				end
+				//Update the bonelist, to change the order the bones are displayed in and/or update their display names
+				back.BoneList.PopulateBoneList()
+				//Now restore the selected bones
+				back.BoneList:ClearSelection()
+				for k, line in pairs (back.BoneList:GetLines()) do
+					if tab[line.id] then
+						back.BoneList:SelectItem(line)
+						//if we're going from multiselect on to multiselect off, then only reselect 1 bone
+						if !GetConVar("cl_animprop_editor_bone_multiselect"):GetBool() then break end
+					end
+				end
+			end
+
+			local check = vgui.Create("DCheckBoxLabel", rpnl)
+			check:SetText("Enable selecting multiple bones\n(ctrl+click, shift+click, or click and drag)")
+			check:SetDark(true)
+			//check:SetHeight(15)
+			check:Dock(TOP)
+			check:DockMargin(padding,betweenitems*2,0,0)
+			check:SetConVar("cl_animprop_editor_bone_multiselect")
+			check.OnChange = BonelistUpdateAppearance
+
+			local check = vgui.Create("DCheckBoxLabel", rpnl)
+			check:SetText("Display bone list as hierarchy")
+			check:SetDark(true)
+			check:SetHeight(15)
+			check:Dock(TOP)
+			check:DockMargin(padding,betweenitems,0,0)
+			check:SetConVar("cl_animprop_editor_bone_hierarchyview")
+			check.OnChange = BonelistUpdateAppearance
+
+			local check = vgui.Create( "DCheckBoxLabel", rpnl)
+			check:SetText("Show bone ID numbers")
+			check:SetDark(true)
+			check:SetHeight(15)
+			check:Dock(TOP)
+			check:DockMargin(padding,betweenitems,0,0)
+			check:SetConVar("cl_animprop_editor_bone_ids")
+			check.OnChange = BonelistUpdateAppearance
+
+			local check = vgui.Create( "DCheckBoxLabel", rpnl)
+			check:SetText("Show icons for linked/unlinked bones")
+			check:SetDark(true)
+			check:SetHeight(15)
+			check:Dock(TOP)
+			check:DockMargin(padding,betweenitems,0,0)
+			check:SetConVar("cl_animprop_editor_bone_linkicons")
 
 		//dummy category to fix bug where lowest category has broken lower padding
 		local rpnl = vgui.Create("DSizeToContents", container)
@@ -1947,7 +2156,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 		back:SizeToChildren(false, true)
 		back:DockPadding(0,0,0,0)
 
-		back.BoneList.UpdateRemapOptions(0)
+		back.BoneList.PopulateBoneList()
 
 	end
 
@@ -1988,7 +2197,7 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 
 		local slider = vgui.Create("DNumSlider", pnl)
 		slider:SetText("Model Scale")
-		slider:SetMinMax(0.06, 16)
+		slider:SetMinMax(GetConVar("sv_animprop_scale_min"):GetFloat(), GetConVar("sv_animprop_scale_max"):GetFloat())
 		slider:SetDefaultValue(1.00)
 		slider:SetDark(true)
 		slider:SetHeight(18)

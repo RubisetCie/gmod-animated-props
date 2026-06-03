@@ -18,10 +18,10 @@ TOOL.Name = "#tool.animprops.name"
 TOOL.Command = nil
 TOOL.ConfigName = "" 
 
-TOOL.ClientConVar["model"] = "models/gman_high.mdl"
-TOOL.ClientConVar["skin"] = "0"
-TOOL.ClientConVar["notifications"] = "1"
-TOOL.ClientConVar["frozen"] = "1"
+TOOL.ClientConVar.model = "models/gman_high.mdl"
+TOOL.ClientConVar.skin = "0"
+TOOL.ClientConVar.notifications = "1"
+TOOL.ClientConVar.frozen = "1"
 
 TOOL.Information = {
 	{name = "left0", stage = 0, icon = "gui/lmb.png"},
