@@ -1,6 +1,6 @@
 AddCSLuaFile()
 
-ENT.Base				= "base_gmodentity"
+ENT.Base 			= "base_gmodentity"
 ENT.PrintName			= "Animated Prop"
 
 ENT.Spawnable			= false
@@ -2097,8 +2097,8 @@ if CLIENT then
 				local physvel = {}
 				for k, _ in pairs (tab) do
 					physvel[k] = {
-						vel = Vector(0, 0, 0),
-						angVel = Vector(0, 0, 0),
+						vel = vector_origin,
+						angVel = vector_origin,
 					}
 				end
 
@@ -3563,6 +3563,7 @@ if CLIENT then
 		self.LastBuildBonePositionsTime = 0
 		self.SavedBoneMatrices = {}
 		self.LastBoneChangeTime = CurTime()
+		self.LastModel = self:GetModel()
 
 		self:AddCallback("BuildBonePositions", self.BuildBonePositions)
 
@@ -3775,6 +3776,18 @@ if CLIENT then
 			return
 		end
 		self.AdvBone_Asleep = nil
+
+		//Catch errors caused by changing the entity's model:
+		//1: If the model has changed, DefaultBoneOffsets will be incorrect, so recreate them
+		//2: If we send an updated BoneInfo table for the new model at the same time, it'll take at least another frame to make it to clients,
+		//   so throw out the old table and wait to receive the new one.
+		if self.LastModel != self:GetModel() then
+			self.RemapInfo_DefaultBoneOffsets = nil
+			self.AdvBone_BoneInfo = nil
+			self.AdvBone_BoneInfo_Received = false
+			self.LastModel = self:GetModel()
+			return
+		end
 
 		//TODO: Animated props can have a different scale than their parent entity. Are there any situations where we should be using the parent's scale instead of our scale?
 		local mdlscl = math.Round(self:GetModelScale(),4) //we need to round these values or else the game won't think they're equal
@@ -4296,8 +4309,9 @@ if CLIENT then
 			end
 		end
 	end
+end
 
-elseif SERVER then
+if SERVER then
 
 	function ENT:CreateAdvBoneInfoTable(par, keepparentempty, matchnames)
 
