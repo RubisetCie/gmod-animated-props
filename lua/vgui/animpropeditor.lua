@@ -1538,16 +1538,135 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 					net.WriteFloat(val)
 				end
 				net.WriteBool(engine.IsRecordingDemo())
-
-				//Wake up BuildBonePositions and get it to use the new info
-				ent.RemapInfo_RemapAngOffsets = nil
-				ent.LastBoneChangeTime = CurTime()
 			net.SendToServer()
+
+			//Wake up BuildBonePositions and get it to use the new info
+			ent.RemapInfo_RemapAngOffsets = nil
+			ent.LastBoneChangeTime = CurTime()
 		end
+
+		local function SendRemapInfoPasteToServer(tab, filter)
+			if !tab then return end
+
+			local serverinfo = {}
+			local pastecount = 0
+
+			for k, entry in pairs (tab) do
+				local id = ent:LookupBone(entry.bonename)
+				
+				if id then
+					//Compile information to be sent to the server for this bone
+					local serverentry = table.Copy(entry)
+					if filter then
+						//Optional "filter" arg to only paste one particular key to each bone (i.e. paste only scale)
+						for k, v in pairs (serverentry) do
+							if k != filter then serverentry[k] = nil end
+						end
+					end
+
+					serverentry.id = id
+					serverentry.bonename = nil
+
+					local parent_changed
+					local ang_changed
+					if ent.RemapInfo and ent.RemapInfo[id] then
+						//Only send parent or ang to the server if the value has changed, otherwise there's no point
+						if serverentry.parent and serverentry.parent != ent.RemapInfo[id].parent then
+							parent_changed = true
+						end
+						if serverentry.ang and serverentry.ang != ent.RemapInfo[id].ang then
+							ang_changed = true
+						end
+						//Also apply the new RemapInfo clientside
+						local i = {
+							parent = serverentry.parent,
+							ang = serverentry.ang,
+						}
+						if i.parent == nil then i.parent = ent.RemapInfo[id].parent end
+						if i.ang == nil then i.ang = ent.RemapInfo[id].ang else i.ang = Angle(i.ang) end
+						ent.RemapInfo[id] = i
+					end
+					if !parent_changed then
+						serverentry.parent = nil
+					end
+					if !ang_changed then
+						serverentry.ang = nil
+					end
+
+					//Update visuals of list entries to show their new status
+					if serverentry.parent then
+						local targetboneid = -1
+						if serverentry.parent != "" then targetboneid = ent2:LookupBone(serverentry.parent) end
+						back.BoneList.Bones[id].HasTargetBone = targetboneid != -1
+					end
+
+					//If nothing has changed for this bone, don't bother sending it to the server
+					if !(!serverentry.parent and !serverentry.ang) then
+						table.insert(serverinfo, serverentry)
+					end
+					//Still keep a count of the number of bones the paste applied to, even if nothing changed
+					pastecount = pastecount + 1
+				end
+			end
+
+			--[[MsgN("client info:")
+			PrintTable(tab)]]
+			--[[MsgN("server info:")
+			PrintTable(serverinfo)]]
+
+			if table.Count(serverinfo) > 0 then //if none of the bones match then this will still be empty
+				//Then, send all of the information to the server so the duplicator can pick it up	
+				net.Start("AnimProp_RemapInfoFromEditorPaste_SendToSv")
+					net.WriteEntity(ent)
+
+					net.WriteBool(engine.IsRecordingDemo())
+
+					net.WriteInt(table.Count(serverinfo), 9)
+					for _, entry in pairs (serverinfo) do
+						net.WriteInt(entry.id, 9)
+
+						net.WriteBool(entry.parent)
+						if entry.parent then
+							net.WriteString(entry.parent)
+						end
+
+						net.WriteBool(entry.ang)
+						if entry.ang then
+							net.WriteFloat(entry.ang.p)
+							net.WriteFloat(entry.ang.y)
+							net.WriteFloat(entry.ang.r)
+						end
+					end
+				net.SendToServer()
+
+				back.BoneList.UpdateRemapOptions()
+			end
+
+			//Wake up BuildBonePositions and get it to use the new info
+			ent.RemapInfo_RemapAngOffsets = nil
+			ent.LastBoneChangeTime = CurTime()
+
+			return pastecount
+		end
+
+
 
 		local lpnl = vgui.Create("Panel", back)
 		lpnl:Dock(LEFT)
 		lpnl:DockMargin(5,0,2,5)
+
+		local entry = vgui.Create("DTextEntry", lpnl)
+		back.BoneFilter = entry
+		entry:SetPlaceholderText("#spawnmenu.quick_filter")
+		entry:SetHeight(20)
+		entry:Dock(TOP)
+		entry:DockMargin(0,0,0,-1)
+		entry:SetUpdateOnType(true)
+		entry.OnValueChange = function(self, txt)
+			if !self._IsUpdating then
+				back.BoneList.PopulateBoneList()
+			end
+		end
 
 		local list = vgui.Create("DListView", lpnl)
 		back.BoneList = list
@@ -1560,8 +1679,14 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 		list.PopulateBoneList = function()
 
 			list:Clear()
-			list:ClearSelection() //TODO: is this unnecessary?
 			list:SetMultiSelect(GetConVar("cl_animprop_editor_bone_multiselect"):GetBool())
+
+			local filter = back.BoneFilter:GetText()
+			if filter == "" then
+				filter = nil
+			elseif filter then
+				filter = filter:lower()
+			end
 
 			ent:SetupBones()
 			ent:InvalidateBoneCache()
@@ -1569,6 +1694,8 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			list.Bones = {}
 
 			local function AddBone(name, id)
+				if filter and !name:lower():find(filter, nil, true) then return end
+
 				local line = list:AddLine(name)
 				list.Bones[id] = line
 				line.id = id
@@ -1609,6 +1736,247 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 						surface.SetMaterial(AnimProp_BoneList_IconLink)
 						surface.DrawTexturedRect(x, (h-16)/2, 16, 16)
 					end
+				end
+
+				//Right Click: Show a dropdown menu with individual bone copy/paste options
+				line.OnRightClick = function()
+					if !IsValid(ent) then return end
+					local menu = DermaMenu()
+
+					local boneids = back.BoneList:GetSelected()
+
+					//Copy (from JUST the selected bone(s), not the whole model)
+					local name = "Copy settings from " .. #boneids .. " selected bones"
+					if #boneids == 1 then name = "Copy settings from " .. #boneids .. " selected bone" end
+					local option = menu:AddOption(name, function()
+						local copytab = {}
+
+						//Fix some bones not being copied and returning invalid (i.e. playermodel weapon bones)
+						ent:SetupBones()
+						ent:InvalidateBoneCache()
+
+						for k, line in pairs (boneids) do
+							local entry = {}
+
+							if ent.RemapInfo and ent.RemapInfo[line.id] then
+								entry.parent = ent.RemapInfo[line.id].parent
+								entry.ang = ent.RemapInfo[line.id].ang
+							else
+								entry.parent = ""
+								entry.ang = Angle()
+							end
+
+							local bonename = ent:GetBoneName(line.id)
+							//MsgN(line.id, " == ", bonename)
+
+							if bonename != "__INVALIDBONE__" then
+								entry.bonename = bonename
+								table.insert(copytab, entry)
+							end
+						end
+						AnimProp_Remap_CopyPasteInfo = copytab //this is a global table shared by all animprop editors, so users can copy remapinfo from one prop to another
+						//PrintTable(AnimProp_Remap_CopyPasteInfo)
+
+						local name = "Copied " .. table.Count(copytab) .. " bones"
+						if table.Count(copytab) == 1 then name = "Copied " .. table.Count(copytab) .. " bone" end
+						GAMEMODE:AddNotify(name, NOTIFY_GENERIC, 2)
+						surface.PlaySound("ambient/water/drip" .. math.random(1, 4) .. ".wav")
+					end)
+					option:SetImage("icon16/page_copy.png")
+
+					//Also put the whole-model copy/paste options here - this is kind of an awkward place for them because it's
+					//inconsistent with advbone, but there's nowhere else good to put these, and they're too useful to leave out.
+					//Copy (all bones)
+					local option = menu:AddOption("Copy settings from all bones", function()
+						local copytab = {}
+
+						//Fix some bones not being copied and returning invalid (i.e. playermodel weapon bones)
+						ent:SetupBones()
+						ent:InvalidateBoneCache()
+
+						local function CopyBone(id)
+							local bonename = ent:GetBoneName(id)
+							//MsgN(id, " == ", bonename)
+							if bonename != "__INVALIDBONE__" then
+								local entry = {}
+
+								if ent.RemapInfo and ent.RemapInfo[id] then
+									entry.parent = ent.RemapInfo[id].parent
+									entry.ang = ent.RemapInfo[id].ang
+								else
+									entry.parent = ""
+									entry.ang = Angle()
+								end
+
+								entry.bonename = bonename
+								table.insert(copytab, entry)
+
+								return true
+							end
+						end
+
+						if !GetConVar("cl_animprop_editor_bone_hierarchyview"):GetBool() then
+							for id = 0, ent:GetBoneCount() - 1 do
+								CopyBone(id)
+							end
+						else
+							//If we're displaying bones in hierarchical order, then we should also be *copying* them in
+							//hierarchical order, so that pasting the settings via selection matches the order they're 
+							//listed in (like it does when they're in numerical order)
+							local function CopyBonesInHierarchy(id)
+								local name = ent:GetBoneName(id)
+								if CopyBone(id) then
+									for _, v in ipairs (ent:GetChildBones(id)) do
+										CopyBonesInHierarchy(v)
+									end
+								end
+							end
+							for id = 0, ent:GetBoneCount() - 1 do
+								local id2 = ent:GetBoneParent(id) 
+								if id2 == nil or id2 < 0 then
+									CopyBonesInHierarchy(id)
+								end
+							end
+						end
+						AnimProp_Remap_CopyPasteInfo = copytab
+						//PrintTable(AnimProp_Remap_CopyPasteInfo)
+
+						local name = "Copied " .. table.Count(copytab) .. " bones"
+						if table.Count(copytab) == 1 then name = "Copied " .. table.Count(copytab) .. " bone" end
+						GAMEMODE:AddNotify(name, NOTIFY_GENERIC, 2)
+						surface.PlaySound("ambient/water/drip" .. math.random(1, 4) .. ".wav")
+					end)
+					option:SetImage("icon16/page_copy.png")
+
+					//Paste (by selection, not by name)
+					local count = 0
+					if istable(AnimProp_Remap_CopyPasteInfo) then count = #AnimProp_Remap_CopyPasteInfo end
+					local name = "Paste " .. count .. " bone settings to " .. #boneids ..  " selected bones"
+					if count == 1 and #boneids == 1 then
+						name = "Paste " .. count .. " bone setting to " .. #boneids ..  " selected bone"
+					elseif count == 1 then
+						name = "Paste " .. count .. " bone setting to " .. #boneids ..  " selected bones"
+					elseif #boneids == 1 then
+						name = "Paste " .. count .. " bone settings to " .. #boneids ..  " selected bone"
+					end
+					local pastefunc = function(filter)
+						local copy_index = 1
+						local pastetab = {}
+
+						//Fix some bones not being copied and returning invalid (i.e. playermodel weapon bones)
+						ent:SetupBones()
+						ent:InvalidateBoneCache()
+
+						//How this works:
+						//The intended use of this feature is to allow the user to A: copy the settings of 1 bone to 1 other bone,
+						//B: copy the settings of 1 bone to multiple other bones, or C: copy the settings of a set of bones to 
+						//another same-sized set (i.e. copying the settings from all the left fingers to all the right fingers). 
+						//However, the way we built this works with either set being any size, so we can also, say, copy just 2 
+						//bones to a big set of bones (bone 1 gets copy 1, bone 2 gets copy 2, then bone 3 gets copy 1 again, and 
+						//so on), or copy a big set of bones to just a few (bone 1 gets copy 1, and so on until we run out of bones 
+						//to copy to, leaving the rest of the copies unused)
+
+						for k, line in pairs (boneids) do
+							local bonename = ent:GetBoneName(line.id)
+							//MsgN(line.id, " == ", bonename)
+
+							local entry = table.Copy(AnimProp_Remap_CopyPasteInfo[copy_index])
+							entry.bonename = bonename
+							table.insert(pastetab, entry)
+
+							copy_index = copy_index + 1
+							if copy_index > count then copy_index = 1 end
+						end
+
+						local count = SendRemapInfoPasteToServer(pastetab, filter)
+						if count != nil then
+							local name = "Pasted " .. count .. " bones"
+							if count == 1 then name = "Pasted " .. count .. " bone" end
+							GAMEMODE:AddNotify(name, NOTIFY_GENERIC, 2)
+							surface.PlaySound("common/wpn_select.wav")
+						end
+					end
+					local submenu, option = menu:AddSubMenu(name, function() pastefunc() end)
+					option:SetEnabled(count > 0)
+					option:SetImage("icon16/page_paste.png")
+					submenu:SetMinimumWidth(0)
+					if count > 0 then
+						local function PerformLayout(self, w, h)
+							self:SizeToContents()
+							self:SetWide( self:GetWide() )//+ 30 ) //the only change; remove extra right-side width
+
+							w = math.max( self:GetParent():GetWide(), self:GetWide() )
+
+							self:SetSize( w, 22 )
+
+							if ( IsValid( self.SubMenuArrow ) ) then
+
+								self.SubMenuArrow:SetSize( 15, 15 )
+								self.SubMenuArrow:CenterVertical()
+								self.SubMenuArrow:AlignRight( 4 )
+
+							end
+
+							DButton.PerformLayout( self, w, h )
+						end
+
+						local option = submenu:AddOption("(only 'Target Bone')", function() pastefunc("parent") end)
+						option:SetTextInset(9,0)
+						option.PerformLayout = PerformLayout
+						
+						local option = submenu:AddOption("(only 'Angle')", function() pastefunc("ang") end)
+						option:SetTextInset(9,0)
+						option.PerformLayout = PerformLayout
+					end
+
+					//Paste (by name)
+					local count = 0
+					if istable(AnimProp_Remap_CopyPasteInfo) then count = #AnimProp_Remap_CopyPasteInfo end
+					local name = "Paste " .. count .. " bone settings by name"
+					if count == 1 then name = "Paste " .. count .. " bone setting by name" end
+					local pastefunc = function(filter)
+						local count = SendRemapInfoPasteToServer(AnimProp_Remap_CopyPasteInfo, filter)
+						if count != nil then
+							local name = "Pasted " .. count .. " bones"
+							if count == 1 then name = "Pasted " .. count .. " bone" end
+							GAMEMODE:AddNotify(name, NOTIFY_GENERIC, 2)
+							surface.PlaySound("common/wpn_select.wav")
+						end
+					end
+					local submenu, option = menu:AddSubMenu(name, function() pastefunc() end)
+					option:SetEnabled(count > 0)
+					option:SetImage("icon16/page_paste.png")
+					submenu:SetMinimumWidth(0)
+					if count > 0 then
+						local function PerformLayout(self, w, h)
+							self:SizeToContents()
+							self:SetWide( self:GetWide() )//+ 30 ) //the only change; remove extra right-side width
+
+							w = math.max( self:GetParent():GetWide(), self:GetWide() )
+
+							self:SetSize( w, 22 )
+
+							if ( IsValid( self.SubMenuArrow ) ) then
+
+								self.SubMenuArrow:SetSize( 15, 15 )
+								self.SubMenuArrow:CenterVertical()
+								self.SubMenuArrow:AlignRight( 4 )
+
+							end
+
+							DButton.PerformLayout( self, w, h )
+						end
+
+						local option = submenu:AddOption("(only 'Target Bone')", function() pastefunc("parent") end)
+						option:SetTextInset(9,0)
+						option.PerformLayout = PerformLayout
+						
+						local option = submenu:AddOption("(only 'Angle')", function() pastefunc("ang") end)
+						option:SetTextInset(9,0)
+						option.PerformLayout = PerformLayout
+					end
+
+					menu:Open()
 				end
 			end
 
@@ -1667,45 +2035,63 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			//MsgN("running UpdateRemapOptions with selected bones: ")
 			//PrintTable(boneids)
 
-			local ang, ang_conflict_p, ang_conflict_y, ang_conflict_r
-			for k, line in pairs (boneids) do
-				local this_ang = ent.RemapInfo[line.id].ang
-				ang = ang or this_ang
-				if ang.p != this_ang.p then ang_conflict_p = true end
-				if ang.y != this_ang.y then ang_conflict_y = true end
-				if ang.r != this_ang.r then ang_conflict_r = true end
-			end
-
-			//if the keyboard focus is on a slider's text field when we update the slider's value, then the text value won't update correctly,
-			//so make sure to take the focus off of the text fields first
-			back.slider_ang_p.TextArea:KillFocus()
-			back.slider_ang_y.TextArea:KillFocus()
-			back.slider_ang_r.TextArea:KillFocus()
-
-			back.slider_ang_p:SetValue(ang.p)
-			back.slider_ang_y:SetValue(ang.y)
-			back.slider_ang_r:SetValue(ang.r)
-
-			if !ang_conflict_p then
-				//taking the focus off of the text areas isn't enough, we also need to update their text manually because vgui.GetKeyboardFocus()
-				//erroneously tells them that they've still got focus and shouldn't be updating themselves
-				back.slider_ang_p.TextArea:SetText(back.slider_ang_p.Scratch:GetTextValue())
+			if !IsValid(ent) or #boneids == 0 then
+				//disable all the remap options if there's no selected bone to use them
+				back.slider_ang_p:SetEnabled(false)
+				back.slider_ang_y:SetEnabled(false)
+				back.slider_ang_r:SetEnabled(false)
+				back.TargetBoneList:SetEnabled(false)
+				back.TargetBoneList:GetParent().Label:SetEnabled(false)
 			else
-				//we've selected multiple bones with conflicting values, don't show any number until this changes
-				back.slider_ang_p.TextArea:SetText("")
-			end
-			if !ang_conflict_y then
-				back.slider_ang_y.TextArea:SetText(back.slider_ang_y.Scratch:GetTextValue())
-			else
-				back.slider_ang_y.TextArea:SetText("")
-			end
-			if !ang_conflict_r then
-				back.slider_ang_r.TextArea:SetText(back.slider_ang_r.Scratch:GetTextValue())
-			else
-				back.slider_ang_r.TextArea:SetText("")
-			end
+				//reenable all the remap options if they're diabled
+				back.slider_ang_p:SetEnabled(true)
+				back.slider_ang_y:SetEnabled(true)
+				back.slider_ang_r:SetEnabled(true)
+				back.TargetBoneList:SetEnabled(true)
+				back.TargetBoneList:GetParent().Label:SetEnabled(true)
 
-			back.TargetBoneList.PopulateTargetBoneList()
+				local ang, ang_conflict_p, ang_conflict_y, ang_conflict_r
+				for k, line in pairs (boneids) do
+					local this_ang = ent.RemapInfo[line.id].ang
+					ang = ang or this_ang
+					if ang.p != this_ang.p then ang_conflict_p = true end
+					if ang.y != this_ang.y then ang_conflict_y = true end
+					if ang.r != this_ang.r then ang_conflict_r = true end
+				end
+
+				//if the keyboard focus is on a slider's text field when we update the slider's value, then the text value won't update correctly,
+				//so make sure to take the focus off of the text fields first
+				if !back.BoneFilter:HasFocus() then //running KillFocus on one of the other panels also kills the focus on the filter textentry, which interrupts the user while typing, so make sure not to do that
+					back.slider_ang_p.TextArea:KillFocus()
+					back.slider_ang_y.TextArea:KillFocus()
+					back.slider_ang_r.TextArea:KillFocus()
+				end
+
+				back.slider_ang_p:SetValue(ang.p)
+				back.slider_ang_y:SetValue(ang.y)
+				back.slider_ang_r:SetValue(ang.r)
+
+				if !ang_conflict_p then
+					//taking the focus off of the text areas isn't enough, we also need to update their text manually because vgui.GetKeyboardFocus()
+					//erroneously tells them that they've still got focus and shouldn't be updating themselves
+					back.slider_ang_p.TextArea:SetText(back.slider_ang_p.Scratch:GetTextValue())
+				else
+					//we've selected multiple bones with conflicting values, don't show any number until this changes
+					back.slider_ang_p.TextArea:SetText("")
+				end
+				if !ang_conflict_y then
+					back.slider_ang_y.TextArea:SetText(back.slider_ang_y.Scratch:GetTextValue())
+				else
+					back.slider_ang_y.TextArea:SetText("")
+				end
+				if !ang_conflict_r then
+					back.slider_ang_r.TextArea:SetText(back.slider_ang_r.Scratch:GetTextValue())
+				else
+					back.slider_ang_r.TextArea:SetText("")
+				end
+
+				back.TargetBoneList.PopulateTargetBoneList()
+			end
 
 			list.UpdatingRemapOptions = false
 		end
@@ -1840,41 +2226,117 @@ function PANEL:RebuildControls(tab, d, d2, d3)
 			end
 			drop.Combo:SetSortItems(false)
 
-			//Modified OpenMenu fuction to check the currently selected bone
+			//Modified OpenMenu fuction to add quick filter to menu, as well as check the currently selected bone and do AnimProp_BoneHoverData
 			drop.Combo.OpenMenu = function(self, pControlOpener)
-				if ( pControlOpener && pControlOpener == self.TextEntry ) then
+				if pControlOpener and pControlOpener == self.TextEntry then
 					return
 				end
 
 				-- Don't do anything if there aren't any options..
-				if ( #self.Choices == 0 ) then return end
+				if #self.Choices == 0 then return end
 
 				-- If the menu still exists and hasn't been deleted
 				-- then just close it and don't open a new one.
-				if ( IsValid( self.Menu ) ) then
+				if IsValid(self.Menu) then
 					self.Menu:Remove()
 					self.Menu = nil
 				end
 
-				self.Menu = DermaMenu( false, self )
-
-				//only this block is meaningfully changed
-				for k, v in pairs( self.Choices ) do
-					local option = self.Menu:AddOption( v, function() self:ChooseOption( v, k ) end )
-					if back.TargetBoneList.selectedtargetbone == self.Data[k] then option:SetChecked(true) end  //check the currently selected target bone
-
-					if self.Data[k] >= 0 then //don't show for "(none)" option
-						option.AnimProp_BoneHoverData = { //info for on-hover check in HUDPaint
-							id = self.Data[k],
-							ent = ent2
-						}
-					end
+				self.Menu = DermaMenu(false, self)
+				//Don't let the menu run MakePopup or it'll steal focus from our textentry and make it unusable; 
+				//instead we'll set the menu's parent manually in self.Menu.UpdateList below for the same effect
+				self.Menu.MakePopup = function() end
+				function self.Menu:OnRemove() 
+					//fix keyboard focus getting stuck on textentry if we remove the menu while focused
+					local chump = vgui.GetKeyboardFocus()
+					if IsValid(chump) then chump:KillFocus() end
 				end
 
-				local x, y = self:LocalToScreen( 0, self:GetTall() )
+				//Dock a quick filter box inside the dropdown, above the scrolling list of bones
+				local old_OnChildAdded = self.Menu.OnChildAdded
+				self.Menu.OnChildAdded = nil //by default this will force the textentry to be added to the scrolling list, so temporarily disable this
+				local entry = vgui.Create("DTextEntry", self.Menu)
+				entry:Dock(TOP)
+				entry:SetZPos(-1) //this ensures that the entry docks at the top of the panel above the VBar
+				self.Menu:GetCanvas():SetZPos(-10) //and *this* prevents the canvas behind the entry from blocking its mouse clicks
+				entry:SetPlaceholderText("#spawnmenu.quick_filter")
+				entry:SetUpdateOnType(true)
+				entry.OnValueChange = function(_, filter)
+					if filter == "" then
+						filter = nil
+					elseif filter then
+						filter = filter:lower()
+					end
+					self.Menu.UpdateList(filter)
+				end
+				self.Menu.OnChildAdded = old_OnChildAdded
+				self.Menu:GetCanvas():Dock(FILL)
+				//Modify the menu's PerformLayout to make it give extra height for the entry
+				function self.Menu:PerformLayout(w,h)
+					local minW = self:GetMinimumWidth()
 
-				self.Menu:SetMinimumWidth( self:GetWide() )
-				self.Menu:Open( x, y, false, self )
+					-- Find the widest one
+					for k, pnl in ipairs( self:GetCanvas():GetChildren() ) do
+
+						pnl:InvalidateLayout( true )
+						minW = math.max( minW, pnl:GetWide() )
+
+					end
+
+					self:SetWide( minW )
+
+					local y = entry:GetTall() //this line is the only change from default (https://github.com/Facepunch/garrysmod/blob/master/garrysmod/lua/vgui/dmenu.lua#L153-L187)
+
+					for k, pnl in ipairs( self:GetCanvas():GetChildren() ) do
+
+						pnl:SetWide( minW )
+						pnl:SetPos( 0, y )
+						pnl:InvalidateLayout( true )
+
+						y = y + pnl:GetTall()
+
+					end
+
+					y = math.min( y, self:GetMaxHeight() )
+
+					self:SetTall( y )
+
+					derma.SkinHook( "Layout", "Menu", self )
+
+					DScrollPanel.PerformLayout( self, minW, h )
+				end
+
+				function self.Menu.UpdateList(filter)
+					self.Menu:Clear()
+
+					for k, v in pairs (self.Choices) do
+						if filter and !v:lower():find(filter, nil, true) then continue end
+
+						local option = self.Menu:AddOption(v, function() self:ChooseOption(v, k) end)
+						if back.TargetBoneList.selectedtargetbone == self.Data[k] then option:SetChecked(true) end //check the currently selected target bone
+					
+						if self.Data[k] >= 0 then //don't show for "(none)" option
+							option.AnimProp_BoneHoverData = { //info for on-hover check in HUDPaint
+								id = self.Data[k],
+								ent = ent2
+							}
+						end
+					end
+
+					local x, y = self:LocalToScreen(0, self:GetTall())
+					self.Menu:SetMinimumWidth(self:GetWide())
+					timer.Simple(0, function()
+						if !IsValid(self.Menu) then return end 
+
+						//this needs to be done on a timer, or else the menu won't be set to the correct y pos when the filter updates
+						//it to be smaller; instead, it'll use the same y pos as the previous iteration until we update the filter again
+						self.Menu:Open(x, y, false, self)
+
+						//and *this* needs to be done *after* each time we run self.Menu:Open, or else the textentry loses focus (why?)
+						self.Menu:SetParent(g_ContextMenu)
+					end)
+				end
+				self.Menu.UpdateList()
 			end
 
 			drop:SetHeight(25)
@@ -2521,7 +2983,7 @@ function PANEL:BuildAnimationList(i, filter)
 	//Sort them in alphabetical order
 	self["SequenceList" .. i] = {}
 	for k, v in SortedPairsByValue(sequencelist) do
-		if !filter or v:find(filter) then
+		if !filter or v:find(filter, nil, true) then
 			table.insert(self["SequenceList" .. i], v)
 		end
 			

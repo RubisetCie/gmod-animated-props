@@ -333,6 +333,8 @@ function ENT:SetupDataTables()
 	self:NetworkVar("Bool", 20, "PuppeteerAlpha")
 	self:NetworkVar("Vector", 3, "PuppeteerPos")
 
+	self:NetworkVar("Bool", 21, "Invert") //(Advanced Bonemerge)
+
 end
 
 function ENT:Initialize()
@@ -763,9 +765,10 @@ function ENT:Think()
 	else
 
 		local parent = self:GetParent()
+		if !IsValid(parent) then parent = nil end
 
 		//(Advanced Bonemerge) (Remapping) If an animation is playing, don't let BuildBonePositions fall asleep
-		if IsValid(parent) or self.IsPuppeteer or (table.Count(self.AdvBone_BoneManips) > 0 and !IsValid(self:GetPuppeteer())) then //don't do all these checks if we're not running buildbonepositions, or if our puppeteer is doing it for us
+		if parent or self.IsPuppeteer or (table.Count(self.AdvBone_BoneManips) > 0 and !IsValid(self:GetPuppeteer())) then //don't do all these checks if we're not running buildbonepositions, or if our puppeteer is doing it for us
 			local animplaying = false
 			for i = 1, 4 do
 				local seq = self["GetChannel" .. i .. "Sequence"](self)
@@ -791,7 +794,7 @@ function ENT:Think()
 				self.LastBoneChangeTime = time
 				//Puppeteers can run this too, so make sure they wake up their parent as well
 				if self.IsPuppeteer then 
-					if IsValid(parent) then
+					if parent then
 						parent.LastBoneChangeTime = time
 					end
 				end
@@ -823,7 +826,7 @@ function ENT:Think()
 				bloat = Vector(bloat, bloat, bloat)
 			end
 			local min, max = self.AdvBone_RenderBounds_BoneMins, self.AdvBone_RenderBounds_BoneMaxs
-			if IsValid(parent) then
+			if parent then
 				local min2, max2 = parent:GetRenderBounds()
 				//adding the parent's render bounds is necessary in order to prevent shadows from getting cut off in some cases i.e. when merged to ragdolls or animprops
 				min, max = Vector(math.min(min.x,min2.x),math.min(min.y,min2.y),math.min(min.z,min2.z)), Vector(math.max(max.x,max2.x),math.max(max.y,max2.y),math.max(max.z,max2.z))
@@ -832,7 +835,7 @@ function ENT:Think()
 
 			//debug: draw render bounds
 			--[[local min, max = self:GetRenderBounds()
-			if IsValid(parent) then
+			if parent then
 				debugoverlay.BoxAngles(parent:GetPos(), min, max, parent:GetAngles(), 0.1, Color(0,255,150,0))
 			else
 				debugoverlay.BoxAngles(self:GetPos(), min, max, self:GetAngles(), 0.1, Color(0,255,150,0))
@@ -840,7 +843,7 @@ function ENT:Think()
 		end
 		local focus = system.HasFocus()
 		if focus == nil or focus == true then //fix: updating shadows out of focus can cause a crash with the GPU Saver addon
-			if IsValid(parent) then
+			if parent then
 				//TODO: this doesn't set the size of the shadow properly unless we set EF_BONEMERGE on the merged ent, but doing that applies the
 				//default bonemerge effect to the model and squashes the animation on any matching bones, so we can't do that
 				//if !parent:IsEffectActive(EF_NOSHADOW) then
@@ -855,54 +858,51 @@ function ENT:Think()
 		end
 
 		//(Advanced Bonemerge) If we're unmerged then clear our render origin and angles so we don't get stuck in that spot
-		if !IsValid(self:GetParent()) and self:GetRenderOrigin() then
+		if !parent and self:GetRenderOrigin() then
 			self:SetRenderOrigin()
 			self:SetRenderAngles()
 		end
 
 		//(Remapping) Set puppeteer's offset from parent and render bounds
-		if self.IsPuppeteer then
-			local parent = self:GetParent()
-			if IsValid(parent) then
-				//Copy parent's scale
-				local scale = parent:GetModelScale()
-				self:SetModelScale(scale)
+		if self.IsPuppeteer and parent then
+			//Copy parent's scale
+			local scale = parent:GetModelScale()
+			self:SetModelScale(scale)
 
-				//Move our model origin with some code mostly copied from BuildBonePositions
-				local posmanip, _ = LocalToWorld(self:GetPuppeteerPos() * parent:GetModelScale(), Angle(), Vector(), parent:GetAngles())
-				local newpos = parent:GetPos() + posmanip
-				if self:GetPos() != newpos then //don't move us if we don't have to, otherwise we'll set off CalcAbsolutePosition every frame
-					self:SetPos(newpos)
-				end
-				local newang = parent:GetAngles()
-				if self:GetAngles() != newang then
-					self:SetAngles(newang)
-				end
-				//Also move our render origin - setpos alone is unreliable since the position can get reasserted if the parent moves or something like that
-				self:SetRenderOrigin(newpos)
-				self:SetRenderAngles(newang)
-
-				//Set puppeteer's render bounds to always render if looking at the parent
-				local seqinfo = self:GetSequenceInfo(self:GetSequence())
-				if !seqinfo then //someone reported a bug where seqinfo returned nil (bad sequence?); not sure what would make this happen, but just use modelbounds as a fallback
-					local mins, maxs = self:GetModelBounds()
-					seqinfo = {
-						bbmin = mins,
-						bbmax = maxs
-					}
-				end
-				local min, max = seqinfo.bbmin * scale, seqinfo.bbmax * scale
-				local min2, max2 = parent:GetRenderBounds()
-				min2 = WorldToLocal(parent:GetPos() + min2, parent:GetAngles(), self:GetPos(), self:GetAngles())
-				max2 = WorldToLocal(parent:GetPos() + max2, parent:GetAngles(), self:GetPos(), self:GetAngles())
-				//This isn't the perfect way to account for weird angles like the ones we mighr get from -1 angle manips, and the render bounds get a bit big sometimes,
-				//but it gets the job done and it's cheaper than WorldToLocaling every corner of the parent's render box.
-				self:SetRenderBounds( Vector(math.min(min.x,min2.x,max2.x),math.min(min.y,min2.y,max2.y),math.min(min.z,min2.z,max2.z)), Vector(math.max(max.x,min2.x,max2.x),math.max(max.y,min2.y,max2.y),math.max(max.z,min2.z,max2.z)) )
-
-				//debug: draw render bounds
-				--[[local min, max = self:GetRenderBounds()
-				debugoverlay.BoxAngles(self:GetPos(), min, max, self:GetAngles(), 0.1, Color(0,255,150,0))]]
+			//Move our model origin with some code mostly copied from BuildBonePositions
+			local posmanip, _ = LocalToWorld(self:GetPuppeteerPos() * parent:GetModelScale(), Angle(), Vector(), parent:GetAngles())
+			local newpos = parent:GetPos() + posmanip
+			if self:GetPos() != newpos then //don't move us if we don't have to, otherwise we'll set off CalcAbsolutePosition every frame
+				self:SetPos(newpos)
 			end
+			local newang = parent:GetAngles()
+			if self:GetAngles() != newang then
+				self:SetAngles(newang)
+			end
+			//Also move our render origin - setpos alone is unreliable since the position can get reasserted if the parent moves or something like that
+			self:SetRenderOrigin(newpos)
+			self:SetRenderAngles(newang)
+
+			//Set puppeteer's render bounds to always render if looking at the parent
+			local seqinfo = self:GetSequenceInfo(self:GetSequence())
+			if !seqinfo then //someone reported a bug where seqinfo returned nil (bad sequence?); not sure what would make this happen, but just use modelbounds as a fallback
+				local mins, maxs = self:GetModelBounds()
+				seqinfo = {
+					bbmin = mins,
+					bbmax = maxs
+				}
+			end
+			local min, max = seqinfo.bbmin * scale, seqinfo.bbmax * scale
+			local min2, max2 = parent:GetRenderBounds()
+			min2 = WorldToLocal(parent:GetPos() + min2, parent:GetAngles(), self:GetPos(), self:GetAngles())
+			max2 = WorldToLocal(parent:GetPos() + max2, parent:GetAngles(), self:GetPos(), self:GetAngles())
+			//This isn't the perfect way to account for weird angles like the ones we mighr get from -1 angle manips, and the render bounds get a bit big sometimes,
+			//but it gets the job done and it's cheaper than WorldToLocaling every corner of the parent's render box.
+			self:SetRenderBounds( Vector(math.min(min.x,min2.x,max2.x),math.min(min.y,min2.y,max2.y),math.min(min.z,min2.z,max2.z)), Vector(math.max(max.x,min2.x,max2.x),math.max(max.y,min2.y,max2.y),math.max(max.z,min2.z,max2.z)) )
+
+			//debug: draw render bounds
+			--[[local min, max = self:GetRenderBounds()
+			debugoverlay.BoxAngles(self:GetPos(), min, max, self:GetAngles(), 0.1, Color(0,255,150,0))]]
 		end
 
 		//(Remapping)
@@ -925,6 +925,16 @@ function ENT:Think()
 			self.csmodeltoremove:Remove()
 			self.csmodeltoremove = nil
 		end
+
+		//(Advanced Bonemerge) fix: going out of the parent's PVS (e.g. going out of bounds) removes the EF_BONEMERGE effect; this breaks shadow 
+		//rendering and causes this entity not to properly follow its parent so readd the effect when it happens. this is copied from advbone
+		//(see https://github.com/NO-LOAFING/AdvBonemerge/pull/3), and fixes the same shadow issue nicely, but unfortunately doesn't work here 
+		//because EF_BONEMERGE applies the default bonemerge effect to the animprop and squashes the animation on any matching bones, so this is 
+		//only kept here for reference.
+		--[[if parent and !self.IsPuppeteer and !self:IsEffectActive(EF_BONEMERGE) then
+			self:AddEffects(EF_BONEMERGE)
+			self:AddEffects(EF_BONEMERGE_FASTCULL)
+		end]]
 
 
 		//Control in-code TF2 minigun animation
@@ -2894,8 +2904,8 @@ elseif CLIENT then
 		Animprop_IsSkyboxDrawing = false
 	end)
 
-	CreateClientConVar("cl_animprop_debug_sleep", 0, false, false, "If 1, show sleep status of prop_animated's BuildBonePositions function (red = asleep, green = awake, no color = not running BuildBonePositions)", 0, 1)
-	local cv_debug_sleep = GetConVar("cl_animprop_debug_sleep")
+	CreateClientConVar("cl_advbone_debug_sleep", 0, false, false, "If 1, show sleep status of ent_advbonemerge and prop_animated's BuildBonePositions function (red = asleep, green = awake, no color = not running BuildBonePositions)", 0, 1)
+	local cv_debug_sleep = GetConVar("cl_advbone_debug_sleep")
 
 	function ENT:Draw(flag)
 
@@ -2964,9 +2974,10 @@ elseif CLIENT then
 		if cv_debug_sleep:GetBool() then
 			if self.AdvBone_Asleep then
 				render.SetColorModulation(1,0,0)
-			else
+			elseif self.AdvBone_Asleep == false then
 				render.SetColorModulation(0,1,0)
 			end
+			//if self.AdvBone_Asleep is nil (BuildBonePositions isn't running), then don't change color
 		end
 
 		//For some reason I can't explain, setting a puppeteer's alpha to 0 with SetColor causes its BuildBonePositions hook to stop running, making it useless as a puppeteer 
@@ -2980,7 +2991,9 @@ elseif CLIENT then
 				self:SetMaterial("")
 			end
 		end
+		if self:GetInvert() then render.CullMode(MATERIAL_CULLMODE_CW) end
 		self:DrawModel()
+		render.CullMode(MATERIAL_CULLMODE_CCW)
 		if self.IsPuppeteer then
 			//Reset blending value once we're done so it doesn't bleed into other draw funcs
 			render.SetBlend(1)
@@ -3389,6 +3402,7 @@ if SERVER then
 	util.AddNetworkString("AnimProp_RemapInfoTable_GetFromSv")
 	util.AddNetworkString("AnimProp_RemapInfoTable_SendToCl")
 	util.AddNetworkString("AnimProp_RemapInfoFromEditor_SendToSv")
+	util.AddNetworkString("AnimProp_RemapInfoFromEditorPaste_SendToSv")
 	util.AddNetworkString("AnimProp_RemapInfoTableUpdate_SendToCl")
 
 	//If we received a request for a remapinfo table, then send it to the client
@@ -3460,6 +3474,48 @@ if SERVER then
 		end
 	end)
 
+
+	//If we received remapinfo from the client (for multiple bones, sent by right-clicking bone(s) in the editor), then apply it to the entity
+	net.Receive("AnimProp_RemapInfoFromEditorPaste_SendToSv", function(_, ply)
+		local ent = net.ReadEntity()
+
+		local demofix = net.ReadBool()
+
+		local count = net.ReadInt(9)
+		for i = 1, count do
+			local id = net.ReadInt(9)
+
+			local parent
+			if net.ReadBool() then
+				parent = net.ReadString()
+			end
+
+			local ang
+			if net.ReadBool() then
+				ang = Angle(net.ReadFloat(), net.ReadFloat(), net.ReadFloat())
+			end
+
+			if IsValid(ent) and ent:GetClass() == "prop_animated" and IsValid(ent:GetPuppeteer()) and ent.RemapInfo then
+				if parent == nil then parent = ent.RemapInfo[id].parent end
+				if ang == nil then ang = ent.RemapInfo[id].ang end
+				ent.RemapInfo[id] = {
+					parent = parent,
+					ang = ang,
+				}
+			end
+		end
+
+		if IsValid(ent) and ent:GetClass() == "prop_animated" and IsValid(ent:GetPuppeteer()) and ent.RemapInfo then
+			//Tell all the other clients that they need to update their RemapInfo tables to receive the changes (the original client already has the changes applied)
+			local filter = RecipientFilter()
+			filter:AddAllPlayers()
+			if !demofix then filter:RemovePlayer(ply) end //Fix for demo recording - demos don't record remapinfo changes made by the editor window, but they DO record network activity, so if ply was recording a demo, then send them a table update too
+			net.Start("AnimProp_RemapInfoTableUpdate_SendToCl")
+				net.WriteEntity(ent)
+			net.Send(filter)
+		end
+	end)
+
 else
 
 	//If we received a remapinfo table from the server, then use it
@@ -3517,6 +3573,12 @@ end
 ////////////////////////////////
 //ADVANCED BONEMERGE FUNCTIONS//
 ////////////////////////////////
+
+//this convar has to be shared between advbone and animprop, because both addons' BuildBonePositions functions need to match 
+//the time interval used by advbone's AdvBone_ResetBoneChangeTimeOnChildren function, but it also still needs to work properly 
+//if animprop uses it without advbone installed (i.e. when remapping). this means a single line of duplicate code, lame!
+local cv_sleep = CreateConVar("sv_advbone_sleep", 0.1, {FCVAR_ARCHIVE, FCVAR_REPLICATED}, "Time interval used by ent_advbonemerge and prop_animated to enter sleep mode - if the entity's bones haven't changed position for this long, then fall asleep and stop building new bone positions to save perf, until woken up by entity movement, parent bone movement, etc.", 0, 1) 
+//this is serverside because we also use it to throttle how often the server can send messages to clients telling them to wake ents back up; see AdvBone_ResetBoneChangeTimeOnChildren in ent_advbonemerge
 
 if CLIENT then
 
@@ -3668,7 +3730,7 @@ if CLIENT then
 		local parent = self:GetParent()
 		if !IsValid(parent) then
 			//If this ent isn't parented, bonemanipped, or puppeteered, then stop here, no need for expensive bone matrix calculation
-			if table.Count(self.AdvBone_BoneManips) == 0 and !IsValid(self:GetPuppeteer()) then return end
+			if table.Count(self.AdvBone_BoneManips) == 0 and !IsValid(self:GetPuppeteer()) then self.AdvBone_Asleep = nil return end //unlike advbone, make sure "not running buildbonepositions" is nil while "awake" is false, so that debug can display them differently
 			parent = nil
 		else
 			if parent.AttachedEntity then parent = parent.AttachedEntity end
@@ -3690,16 +3752,18 @@ if CLIENT then
 			//scale, or pose parameters, in various places in this file.
 			//Also make sure SavedBoneMatrices isn't empty, so we don't start skipping before we've actually built our bone positions
 			//(can happen with animprops that spawn offscreen, only seems to happen with unmerged props so no need to add this to ent_advbonemerge)
-			if !self:GetControlMovementPoseParams() and !table.IsEmpty(self.SavedBoneMatrices) and self.LastBoneChangeTime + (FrameTime() * 10) < curtime then
+			if !self:GetControlMovementPoseParams() and !table.IsEmpty(self.SavedBoneMatrices) and
+			self.AdvBone_AllowSleep and self.LastBoneChangeTime + cv_sleep:GetFloat() < curtime then
 				if !parent or (parent.AdvBone_LastParentBoneCheckTime and parent.AdvBone_LastParentBoneCheckTime >= curtime) then
 					//This check only needs to be performed once per frame, even if there are multiple models merged to one parent
 					skip = true
 				else
-					//Don't bother doing this if the parent has significantly more bones than we do
 					local parbonecount = parent:GetBoneCount()
-					if parbonecount / 2 <= bonecount then
+					//If our parent's bonecount is so much higher than our bonecount that doing this wakeup check
+					//would be *more expensive* than building our own bone positions, then don't bother doing this
+					if bonecount + 1 > parbonecount / 11 then //parent has over 11x more bones than us, including our origin manip; compare advbone's 7x check
 						local parentbones = {}
-						for i = -1, parbonecount - 1 do
+						for i = 0, parbonecount - 1 do
 							local matr = parent:GetBoneMatrix(i)
 							if ismatrix(matr) then
 								//parentbones[i] = matr:ToTable() //this func suuucks for perf when there's a lot at once
@@ -3723,6 +3787,7 @@ if CLIENT then
 							for k, v in pairs (self.SavedParentBoneMatrices) do
 								if !parentbones[k] then
 									ParentNoChange = false
+									break
 								elseif ParentNoChange then
 									for k2, v2 in pairs (v) do
 										if ParentNoChange then
@@ -3754,6 +3819,7 @@ if CLIENT then
 			else
 				self.SavedParentBoneMatrices = nil
 			end
+			self.AdvBone_Asleep = skip //this tells the think func to stop calculating render bounds
 		end
 
 		//If we're going to skip, then use cached bone matrices instead of computing new ones, and stop here
@@ -3772,10 +3838,12 @@ if CLIENT then
 					self:SetBoneMatrix(i, self.SavedBoneMatrices[i])
 				end
 			end
-			self.AdvBone_Asleep = true //this tells the think func to stop calculating render bounds
 			return
+		elseif parent and !self.IsPuppeteer then
+			//Without EF_BONEMERGE, we need to do this to give the parent entity a nudge every frame, otherwise some of 
+			//its bones like tf2 classes' weapon_bone will return _INVALIDBONE, and we won't be able to get their matrix.
+			parent:GetBonePosition(0) //note: which bone we get doesn't matter, this fixes all invalid bones; GetBoneMatrix doesn't work
 		end
-		self.AdvBone_Asleep = nil
 
 		//Catch errors caused by changing the entity's model:
 		//1: If the model has changed, DefaultBoneOffsets will be incorrect, so recreate them
@@ -3976,7 +4044,7 @@ if CLIENT then
 
 						matr = targetmatr
 
-						if (self.AdvBone_BoneInfo[i].scale == false) then
+						if !self.AdvBone_BoneInfo[i].scale then
 							//Since we don't want to use the target bone's scale, rescale the matrix so it's back to normal
 							matr:SetScale(mdlsclvec)  //we still want to inherit the overall model scale for things like npcs and animated props
 
@@ -4028,7 +4096,7 @@ if CLIENT then
 						//Create a matrix for the model origin
 						matr = Matrix()
 						//If our origin isn't following a bone, then that means it's actually following the parent's origin, so inherit origin manip stuff from it
-						if parent and parent.AdvBone_OriginMatrix and self.AdvBone_BoneInfo[i].scale != false then
+						if parent and parent.AdvBone_OriginMatrix and self.AdvBone_BoneInfo[i].scale then
 							matr:Set(parent.AdvBone_OriginMatrix)
 					
 							matr:Translate(self:GetManipulateBonePosition(-1))
@@ -4085,7 +4153,7 @@ if CLIENT then
 						end
 				
 						if parentmatr then
-							if (self.AdvBone_BoneInfo[i].scale != false) then
+							if self.AdvBone_BoneInfo[i].scale then
 								//Start off with the parent bone matrix
 								matr = parentmatr
 
@@ -4268,10 +4336,7 @@ if CLIENT then
 							end
 						end
 					else
-						//MsgN(matr)
-						//MsgN("!=")
-						//MsgN(self.SavedBoneMatrices[i])
-						//MsgN("")
+						//MsgN(self:GetBoneName(i), "\n", matr, "\n != \n", self.SavedBoneMatrices[i], "\n")
 						BonesHaveChanged = true
 					end
 				end
@@ -4293,6 +4358,14 @@ if CLIENT then
 		if BonesHaveChanged then
 			self.LastBoneChangeTime = curtime
 		end
+		//(ported from advbone; this may not be necessary for prop_animated, i can't recreate any
+		//of the issues this is meant to fix, but this is cheap, so better safe than sorry here)
+		//As a failsafe, if FPS is low enough to make the frame time longer than sv_advbone_sleep (<10 FPS by default), then make sure 
+		//to compare at *least* two frames to try to make sure that our parent ent's bones have stopped moving around - otherwise, we'll 
+		//update bones once, and then fall asleep in the very next frame without checking. This is bad because it can cause this model to 
+		//freeze intermittently while the parent animates (i.e. gun attachments on a character playing a subtle idle animation), or fall 
+		//asleep in a position out-of-sync with the parent (i.e. bones merged to jigglebones)
+		self.AdvBone_AllowSleep = !BonesHaveChanged
 	end
 
 	function ENT:CalcAbsolutePosition(pos, ang)

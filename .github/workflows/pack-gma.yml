@@ -13,13 +13,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Installing Premake
         run: sudo apt-get install premake4
       - name: Building Bootil
         run: |
           git clone --depth 1 https://github.com/garrynewman/bootil.git && cd bootil/projects
-          premake4 gmake && cd linux/gmake && make config=release
+          premake4 gmake && cd linux/gmake && make config=release CC='gcc -include unistd.h' CXX=g++
         working-directory: ..
       - name: Building GMAD
         run: |
@@ -39,7 +39,7 @@ jobs:
           draft: true
           files: animated-props.zip
 #      - name: Upload artifact
-#        uses: actions/upload-artifact@v6
+#        uses: actions/upload-artifact@v7
 #        with:
 #          name: animated-props
 #          path: animated-props.gma
